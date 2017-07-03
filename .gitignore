@@ -1,0 +1,11 @@
+*target
+*.cache
+*.classpath
+*.project
+*.settings
+*.idea
+*.tmpBin
+/logs
+/sbt
+/sbt.bat
+sample/commonSlick/sbt

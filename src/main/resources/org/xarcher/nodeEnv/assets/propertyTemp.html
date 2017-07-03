@@ -1,0 +1,17 @@
+<div class="djx-ubw-properties" style="padding-left: 20px; padding-top: 20px; background-color: yellowgreen;">
+    <div style="background-color: #fcd6a7;">
+        <a style="background-color: #A6BBCE; display: inline-block; padding: 0 5px;">模板名称</a>{contentKey}
+        <a style="background-color: #A6BBCE; display: inline-block; padding: 0 5px; margin-left: 10px;">传入参数</a>{param}
+        <a style="background-color: #A6BBCE; display: inline-block; padding: 0 5px; margin-left: 10px;">排序分页条件</a>{slickParam}
+    </div>
+    {#properties}
+    <div style="background-color: yellow;">
+        <p style="margin: 0; padding: 0; border-top: 3px solid #FF9900;">
+            <a style="background-color: #66ccff; display: inline-block; padding: 0 5px;">{property}</a>
+            {?describe}<a style="background-color: #A6BBCE; display: inline-block; padding: 0 5px; margin-left: 10px;">说明</a>{describe}{/describe}
+            <a style="background-color: #A6BBCE; display: inline-block; padding: 0 5px; margin-left: 10px;">scala 类型</a>{typeName}
+            <a style="background-color: #A6BBCE; display: inline-block; padding: 0 5px; margin-left: 10px;">是否能排序</a>{@eq key=canOrder value="true" type="boolean"}是{:else}否{/eq}
+        </p>
+    </div>
+    {/properties}
+</div>

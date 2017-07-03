@@ -1,0 +1,8 @@
+{@playRequest key="infoRequest"}
+<div>
+    {@slickJsonOut key=queryName name=infoRequest.concatName slickParam="pageIndex 2 pageSize 2"}
+    <a href="/each?concatName={infoRequest.concatName|uc}&queryName={queryName|uc}">{queryName}</a> 查询到的数据有{.content.size}条<br />
+    /each?concatName={infoRequest.concatName|uc}&queryName={queryName|uc}
+    {/slickJsonOut}
+</div>
+{/playRequest}
