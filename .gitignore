@@ -8,4 +8,6 @@
 /logs
 /sbt
 /sbt.bat
+/framework/sbt
+/framework/sbt.bat
 sample/commonSlick/sbt
