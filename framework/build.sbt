@@ -22,7 +22,7 @@ val playV = "2.6.0"
 
 libraryDependencies += "com.typesafe.play" %% "play" % playV
 
-lazy val fsnProject = RootProject(file("../fsn"))
+lazy val fsnProject = RootProject(file("../../fsn"))
 
 scalaVersion := "2.11.11"
 
