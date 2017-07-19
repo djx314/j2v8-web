@@ -14,7 +14,7 @@ libraryDependencies ++= {
   )
 }
 
-val playV = "2.6.0"
+val playV = "2.6.1"
 
 libraryDependencies += "commons-io" % "commons-io" % "2.5"
 
@@ -22,10 +22,10 @@ libraryDependencies += "com.typesafe.play" %% "play-guice" % playV
 //lazy val playVersion = play.core.PlayVersion.current
 libraryDependencies += "com.typesafe.play" %% "play" % playV
 
-lazy val fsnProject = RootProject(file("../fsn"))
+lazy val ubwProject = RootProject(file("../ubw"))
 
 scalaVersion := "2.11.11"
 
-dependsOn(fsnProject)
+dependsOn(ubwProject)
 
 scalacOptions ++= Seq("-Ywarn-unused-import", "-deprecation")
