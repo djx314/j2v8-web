@@ -14,7 +14,7 @@ libraryDependencies ++= {
   )
 }
 
-val playV = "2.6.1"
+val playV = "2.6.2"
 
 libraryDependencies += "commons-io" % "commons-io" % "2.5"
 
