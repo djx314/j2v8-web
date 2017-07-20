@@ -24,7 +24,7 @@ libraryDependencies += "com.typesafe.play" %% "play" % playV
 
 lazy val ubwProject = RootProject(file("../ubw"))
 
-scalaVersion := "2.11.11"
+scalaVersion := "2.12.2"
 
 dependsOn(ubwProject)
 
