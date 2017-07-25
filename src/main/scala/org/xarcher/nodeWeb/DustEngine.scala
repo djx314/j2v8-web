@@ -1,18 +1,19 @@
 package org.xarcher.nodeWeb
 
-import java.io.File
-import java.util.UUID
+import com.eclipsesource.v8._
+
+import java.nio.charset.Charset
+import java.nio.file.Files
+
 import javax.inject.Singleton
 
-import com.eclipsesource.v8._
-import org.slf4j.LoggerFactory
-import org.xarcher.nodeWeb.modules.CopyHelper
 import org.xarcher.urlParser.{ InfoWrap, ParseResult }
+
 import play.api.mvc.{ AnyContent, Request }
 import play.api.inject.ApplicationLifecycle
 
+import scala.collection.JavaConverters._
 import scala.concurrent.{ ExecutionContext, Future, Promise }
-import scala.io.Source
 import scala.util.{ Failure, Success, Try }
 
 trait AsyncContentCols {
@@ -33,16 +34,16 @@ trait DustEngine {
 
 @Singleton
 class DustEngineImpl @javax.inject.Inject() (
-    applicationLifecycle: ApplicationLifecycle,
+    applicationLifecycle1: ApplicationLifecycle,
     templateConfigure: TemplateConfigure,
     //common: ControllerComponents,
-    _ec: ExecutionContext,
-    dustExecution: DustExecution
-) extends DustEngine {
+    dustExecutionWrap: DustExecution
+)(implicit ec: ExecutionContext) extends NodeJSModule with DustEngine {
 
-  val logger = LoggerFactory.getLogger(classOf[DustEngine])
+  override def applicationLifecycle = applicationLifecycle1
 
-  private implicit val ec = _ec
+  override def dustExecution = dustExecutionWrap.singleThread
+  override val defaultExecutionContext = ec
 
   def renderString = {
     if (templateConfigure.isNodeProd) {
@@ -52,72 +53,27 @@ class DustEngineImpl @javax.inject.Inject() (
     }
   }
 
-  val tempPath = System.getProperty("java.io.tmpdir")
-  val dirName = UUID.randomUUID().toString
-  val tempJSRoot = new File(tempPath, "enuma_nodejs_temp")
-  val temDir = new File(tempJSRoot, dirName)
-
-  def genNodeJS = {
-    CopyHelper.copyFromClassPath(List("org", "xarcher", "nodeEnv", "assets"), temDir.toPath).flatMap { (_: Boolean) =>
-      var nodeJS: NodeJS = null
-      var v8: V8 = null
-      var module: V8Object = null
-
-      Future {
-        nodeJS = NodeJS.createNodeJS()
-        v8 = nodeJS.getRuntime
-
-        val propertyTemplateString = Source.fromFile(new File(temDir, "propertyTemp.html"), "utf-8").getLines().mkString("\n")
-        v8.add("propertyTemplateString", propertyTemplateString)
-        module = nodeJS.require(new File(temDir, "dustTest.js"))
-        (nodeJS, v8, module)
-      }(dustExecution.singleThread)
-        .andThen {
-          case _ =>
-            applicationLifecycle.addStopHook { () =>
-              Future {
-                logger.info("开始回收 node 资源")
-                if (module ne null) Try {
-                  module.release()
-                  logger.info("回收 dust 模块资源完毕")
-                }
-                else {
-                  logger.info("dust 模块资源未正确初始化，跳过回收")
-                }
-                if (nodeJS ne null) Try {
-                  nodeJS.release()
-                  logger.info("回收 nodejs 对象完毕")
-                }
-                else {
-                  logger.info("nodejs 对象未正确初始化，跳过回收")
-                }
-                if (v8 ne null) Try {
-                  v8.release()
-                  logger.info("回收 v8 全局对象完毕")
-                }
-                else {
-                  logger.info("v8 全局对象未正确初始化，跳过回收")
-                }
-                ()
-              }(dustExecution.singleThread).andThen {
-                case Failure(e) =>
-                  logger.error("回收 j2v8 资源时出现错误", e)
-                case Success(_: Unit) =>
-                  logger.info("j2v8 资源回收完毕")
-              }
-            }
-
-        }
-    }
-  }
-
   private lazy val lazytRenderString = defRenderString
 
-  private def defRenderString: Future[DustGen] = genNodeJS.flatMap {
+  def addPropertyTemplateString(v8: V8) = {
+    val propertyTemplateString = Files.readAllLines(temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
+    Future {
+      v8.add("propertyTemplateString", propertyTemplateString)
+    }(dustExecution)
+  }
+
+  private def defRenderString: Future[DustGen] = (for {
+    nodeJS <- nodeJSF
+    v8 <- v8F
+    _ = addPropertyTemplateString(v8)
+    module <- moduleF
+  } yield {
+    (nodeJS, v8, module)
+  }).flatMap {
     case (nodeJS, v8, module) =>
       val paramConvert = Future {
 
-        val tempStr1 = Source.fromFile(new File(temDir, "totalTemplate.html"), "utf-8").getLines().mkString("\n")
+        val tempStr1 = Files.readAllLines(temDir.resolve("totalTemplate.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
         module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
 
         new DustGen {
@@ -147,13 +103,13 @@ class DustEngineImpl @javax.inject.Inject() (
                           case Right(data) =>
                             callback.executeJSFunction("callback", data)
                         }
-                      }(dustExecution.singleThread).andThen {
+                      }(dustExecution).andThen {
                         case Success(_) =>
                           callback.release()
                         case scala.util.Failure(e) =>
                           e.printStackTrace()
                           callback.release()
-                      }(dustExecution.singleThread)
+                      }(dustExecution)
                       null
                     case _ =>
                       callback.release()
@@ -220,7 +176,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
               module.executeJSFunction("outPut", content, param, isDebug.asInstanceOf[Object], v8Query, v8Promise)
               resultFuture
-            }(dustExecution.singleThread).flatMap(identity)(dustExecution.singleThread)
+            }(dustExecution).flatMap(identity)(dustExecution)
               .andThen {
                 case _ =>
                   Future {
@@ -248,7 +204,7 @@ class DustEngineImpl @javax.inject.Inject() (
                     closeJSAssets(successCallback)
                     closeJSAssets(failureCallback)
                     closeJSAssets(v8Promise)
-                  }(dustExecution.singleThread).andThen {
+                  }(dustExecution).andThen {
                     case Failure(e) =>
                       e.printStackTrace
                   }
@@ -256,7 +212,7 @@ class DustEngineImpl @javax.inject.Inject() (
           }
 
         }
-      }(dustExecution.singleThread)
+      }(dustExecution)
 
       paramConvert
   }

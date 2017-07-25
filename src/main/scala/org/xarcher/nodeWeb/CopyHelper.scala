@@ -17,9 +17,9 @@ object CopyHelper {
 
   val logger = LoggerFactory.getLogger(getClass)
 
-  def copyFromClassPath(paths: List[String], targetRoot: Path)(implicit ec: ExecutionContext): Future[Boolean] = Future {
+  def copyFromClassPath(path: String, targetRoot: Path)(implicit ec: ExecutionContext): Future[Boolean] = Future {
     Files.createDirectories(targetRoot)
-    val classPathStr = paths.mkString("/")
+    val classPathStr = path
     val sourURLs = getClass.getClassLoader.getResources(classPathStr).asScala.toStream
     sourURLs.map { sourURL =>
       val date = new Date()
