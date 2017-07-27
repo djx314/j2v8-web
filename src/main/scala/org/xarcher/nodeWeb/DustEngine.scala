@@ -22,7 +22,7 @@ trait AsyncContentCols {
 
 trait DustGen {
 
-  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, isDebug: Boolean): Future[String]
+  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: Request[AnyContent] => AsyncContent, isDebug: Boolean): Future[String]
 
 }
 
@@ -78,17 +78,19 @@ class DustEngineImpl @javax.inject.Inject() (
 
         new DustGen {
 
-          override def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, isDebug: Boolean): Future[String] = {
+          override def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: Request[AnyContent] => AsyncContent, isDebug: Boolean): Future[String] = {
             var execQuery: V8Function = null
             var v8Query: V8Object = null
             var v8Request: V8Object = null
             var successCallback: V8Function = null
             var failureCallback: V8Function = null
             var v8Promise: V8Object = null
+            var serverDataQuery: V8Function = null
 
             Future {
               v8Query = new V8Object(v8)
               val queryMap: Map[String, AsyncContent] = contents.contentMap.map { case (key, cntentApply) => key -> cntentApply(request) }
+
               execQuery = new V8Function(v8, new JavaCallback {
                 override def invoke(receiver: V8Object, parameters: V8Array): Object = {
                   val key = parameters.getString(0)
@@ -120,6 +122,29 @@ class DustEngineImpl @javax.inject.Inject() (
 
               })
 
+              serverDataQuery = new V8Function(v8, new JavaCallback {
+                override def invoke(receiver: V8Object, parameters: V8Array): Object = {
+                  val serverData = parameters.getString(0)
+                  val callback = parameters.getObject(1)
+                  serverDataContent(request).exec(serverData).map { s =>
+                    s match {
+                      case Left(e) =>
+                        throw e
+                      case Right(data) =>
+                        callback.executeJSFunction("callback", data)
+                    }
+                  }(dustExecution).andThen {
+                    case Success(_) =>
+                      callback.release()
+                    case scala.util.Failure(e) =>
+                      e.printStackTrace()
+                      callback.release()
+                  }(dustExecution)
+                  null
+                }
+
+              })
+
               v8Request = new V8Object(v8)
 
               parseResult.infos.foreach {
@@ -140,6 +165,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
               v8Query.add("query", execQuery)
               v8Query.add("request", v8Request)
+              v8Query.add("serverData", serverDataQuery)
 
               val promise = Promise[String]
               val resultFuture = promise.future
@@ -199,6 +225,7 @@ class DustEngineImpl @javax.inject.Inject() (
                     }
 
                     closeJSAssets(execQuery)
+                    closeJSAssets(serverDataQuery)
                     closeJSAssets(v8Query)
                     closeJSAssets(v8Request)
                     closeJSAssets(successCallback)

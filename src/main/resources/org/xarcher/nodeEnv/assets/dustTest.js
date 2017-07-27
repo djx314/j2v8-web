@@ -66,6 +66,17 @@ var slickJsonOutAPI = function(contentKey, param, slickParam, isDebug, query, cb
     }
 };
 
+var serverDataRequest = function(serverKey, param, query, cb) {
+    try {
+        query.serverData(JSON.stringify({ serverKey: serverKey, data: param }), { callback: function(s) {
+            var result = JSON.parse(s);
+            cb(result);
+        } });
+    } catch (e) {
+        cb(e, null);
+    }
+};
+
 dust.helpers.slickJsonOut = function(chunk, context, bodies, params) {
     var slickParam = context.resolve(params.slickParam);
     var key = context.resolve(params.key);
@@ -101,6 +112,18 @@ dust.helpers.playRequest = function(chunk, context, bodies, params) {
     return chunk.map(function(inChunk) {
         inChunk.render(bodies.block, context.push(ctxObj)).end();
     });
+};
+
+dust.helpers.serverData = function(chunk, context, bodies, params) {
+    var key = context.resolve(params.key);
+    delete params.key;
+
+    var aa = chunk.map(function(inChunk) {
+        serverDataRequest(key, params, context.get("scala-query"), function(result) {
+            inChunk.render(bodies.block, context.push({ content: result })).end();
+        });
+    });
+    return aa;
 };
 
 dust.filters.d = function(value) {
