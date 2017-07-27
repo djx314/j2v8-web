@@ -17,12 +17,12 @@ import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }
 
 trait AsyncContentCols {
-  val contentMap: Map[String, Request[AnyContent] => AsyncContent]
+  val contentMap: Map[String, AsyncContent]
 }
 
 trait DustGen {
 
-  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: Request[AnyContent] => AsyncContent, isDebug: Boolean): Future[String]
+  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: AsyncContent, isDebug: Boolean): Future[String]
 
 }
 
@@ -78,7 +78,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
         new DustGen {
 
-          override def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: Request[AnyContent] => AsyncContent, isDebug: Boolean): Future[String] = {
+          override def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: AsyncContent, isDebug: Boolean): Future[String] = {
             var execQuery: V8Function = null
             var v8Query: V8Object = null
             var v8Request: V8Object = null
@@ -89,7 +89,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
             Future {
               v8Query = new V8Object(v8)
-              val queryMap: Map[String, AsyncContent] = contents.contentMap.map { case (key, cntentApply) => key -> cntentApply(request) }
+              val queryMap: Map[String, AsyncContent] = contents.contentMap.map { case (key, cntentApply) => key -> cntentApply }
 
               execQuery = new V8Function(v8, new JavaCallback {
                 override def invoke(receiver: V8Object, parameters: V8Array): Object = {
@@ -98,7 +98,7 @@ class DustEngineImpl @javax.inject.Inject() (
                   val callback = parameters.getObject(2)
                   queryMap.get(key) match {
                     case Some(query) =>
-                      query.exec(param).map { s =>
+                      query.exec(param, request).map { s =>
                         s match {
                           case Left(e) =>
                             throw e
@@ -126,7 +126,7 @@ class DustEngineImpl @javax.inject.Inject() (
                 override def invoke(receiver: V8Object, parameters: V8Array): Object = {
                   val serverData = parameters.getString(0)
                   val callback = parameters.getObject(1)
-                  serverDataContent(request).exec(serverData).map { s =>
+                  serverDataContent.exec(serverData, request).map { s =>
                     s match {
                       case Left(e) =>
                         throw e
