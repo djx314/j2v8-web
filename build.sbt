@@ -29,3 +29,5 @@ scalaVersion := "2.12.2"
 dependsOn(ubwProject)
 
 scalacOptions ++= Seq("-Ywarn-unused-import", "-deprecation")
+
+name := "play-dust"
