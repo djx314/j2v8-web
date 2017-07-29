@@ -11,7 +11,7 @@ import play.api.inject.ApplicationLifecycle
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ ExecutionContext, Future, Promise }
-import scala.util.{ Failure, Success }
+import scala.util.{ Failure, Try }
 
 trait AsyncContentCols {
   val contentMap: Map[String, AsyncContent]
@@ -55,14 +55,21 @@ class DustEngineImpl @javax.inject.Inject() (
   }
 
   def addPropertyTemplateString(v8: V8) = {
-    val propertyTemplateString = Files.readAllLines(temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
-    Future {
-      v8.add("propertyTemplateString", propertyTemplateString)
-      propertyTemplateString
-    }(dustExecution)
+
   }
 
-  lazy val addPropertyTemplateStringAction: Future[String] = v8F.flatMap(addPropertyTemplateString)
+  lazy val addTemplateAction = moduleF.map { module =>
+    val propertyTemplateString = Files.readAllLines(temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
+    val tempStr1 = propertyTemplateString
+    module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
+    tempStr1
+  }(dustExecution)
+
+  lazy val addPropertyTemplateStringAction: Future[String] = v8F.map { v8 =>
+    val propertyTemplateString = Files.readAllLines(temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
+    v8.add("propertyTemplateString", propertyTemplateString)
+    propertyTemplateString
+  }(dustExecution)
 
   def releaseJSObject(v8Obj: V8Object): Future[Boolean] = {
     Future {
@@ -85,12 +92,11 @@ class DustEngineImpl @javax.inject.Inject() (
       (for {
         nodeJS <- nodeJSF
         v8 <- v8F
-        propertyString <- addPropertyTemplateStringAction
+        _ <- addPropertyTemplateStringAction
         module <- moduleF
-      } yield Future {
+        _ <- addTemplateAction
+      } yield {
 
-        val tempStr1 = propertyString
-        module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
         var execQuery: V8Function = null
         var v8Query: V8Object = null
         var v8Request: V8Object = null
@@ -107,29 +113,44 @@ class DustEngineImpl @javax.inject.Inject() (
             override def invoke(receiver: V8Object, parameters: V8Array): Object = {
               val key = parameters.getString(0)
               val param = parameters.getString(1)
-              val callback = parameters.getObject(2)
+              val callback = parameters.getObject(2).asInstanceOf[V8Function]
+              val callBackParams = new V8Array(v8)
               queryMap.get(key) match {
                 case Some(query) =>
-                  query.exec(param, request).map { s =>
+                  (query.exec(param, request).map { s =>
                     s match {
                       case Left(e) =>
                         throw e
                       case Right(data) =>
-                        callback.executeJSFunction("callback", data)
+                        callBackParams.push(data)
+                        callback.call(null, callBackParams)
                     }
+                    true
                   }(dustExecution).andThen {
-                    case Success(_) =>
-                      callback.release()
-                    case scala.util.Failure(e) =>
-                      e.printStackTrace()
-                      callback.release()
-                  }(dustExecution)
-                  null
+                    case s =>
+                      (for {
+                        _ <- releaseJSObject(callback)
+                        _ <- releaseJSObject(callBackParams)
+                      } yield {
+                        true
+                      }).map { _: Boolean =>
+                        s match {
+                          case Failure(e) =>
+                            logger.error("执行 exec query 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
+                          case _ =>
+                        }
+                      }
+                  }): Future[Boolean]
                 case _ =>
-                  callback.release()
+                  for {
+                    _ <- releaseJSObject(callback)
+                    _ <- releaseJSObject(callBackParams)
+                  } yield {
+                    true
+                  }
                   throw new Exception(s"找不到键：${key}对应的查询方案")
-                  null
               }
+              null
             }
 
           })
@@ -139,7 +160,7 @@ class DustEngineImpl @javax.inject.Inject() (
               val serverData = parameters.getString(0)
               val callback = parameters.get(1).asInstanceOf[V8Function]
               val callBackParams = new V8Array(v8)
-              serverDataContent.exec(serverData, request).map { s =>
+              (serverDataContent.exec(serverData, request).map { s =>
                 s match {
                   case Left(e) =>
                     callBackParams.pushNull()
@@ -152,22 +173,20 @@ class DustEngineImpl @javax.inject.Inject() (
                 }
                 true
               }(dustExecution).andThen {
-                case Success(_: Boolean) =>
-                  for {
+                case s =>
+                  (for {
                     _ <- releaseJSObject(callback)
                     _ <- releaseJSObject(callBackParams)
                   } yield {
                     true
+                  }).map { _: Boolean =>
+                    s match {
+                      case Failure(e) =>
+                        logger.error("执行 Remote Json 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
+                      case _ =>
+                    }
                   }
-                case scala.util.Failure(e) =>
-                  logger.error("执行 Remote Json 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
-                  for {
-                    _ <- releaseJSObject(callback)
-                    _ <- releaseJSObject(callBackParams)
-                  } yield {
-                    true
-                  }
-              }
+              }): Future[Boolean]
               null
             }
           })
@@ -205,7 +224,7 @@ class DustEngineImpl @javax.inject.Inject() (
                 null
               } catch {
                 case e: Exception =>
-                  e.printStackTrace()
+                  logger.error("须处理的 j2v8 运行时错误", e)
                   null
               }
             }
@@ -218,7 +237,7 @@ class DustEngineImpl @javax.inject.Inject() (
                 null
               } catch {
                 case e: Exception =>
-                  e.printStackTrace()
+                  logger.error("须处理的 j2v8 运行时错误", e)
                   null
               }
             }
@@ -228,11 +247,11 @@ class DustEngineImpl @javax.inject.Inject() (
 
           v8Promise.add("failure", failureCallback)
 
-          module.executeJSFunction("outPut", content, param, isDebug.asInstanceOf[Object], v8Query, v8Promise)
+          module.executeJSFunction("outPut", content, param, isDebug: java.lang.Boolean, v8Query, v8Promise)
           resultFuture
-        }(dustExecution).flatMap(identity)(dustExecution)
+        }(dustExecution).flatten
           .andThen {
-            case _ =>
+            case _: Try[String] =>
               (Future {
                 nodeJS.handleMessage()
               }(dustExecution).flatMap { _ =>
@@ -251,8 +270,8 @@ class DustEngineImpl @javax.inject.Inject() (
                   false
               }): Future[Boolean]
           }
-      }(dustExecution))
-        .flatten.flatten
+      })
+        .flatten
         .recoverWith {
           case e: Exception =>
             logger.error("渲染 dust 模板发生不可预料的错误", e)

@@ -5,7 +5,7 @@ var propertyTemplate = dust.loadSource(dust.compile(propertyTemplateString));
 
 var slickJsonOutAPI = function(contentKey, param, slickParam, isDebug, query, cb) {
     try {
-        query.query(contentKey, JSON.stringify({ param: param, slickParam: slickParam, isDebug: isDebug }), { callback: function(s) {
+        query.query(contentKey, JSON.stringify({ param: param, slickParam: slickParam, isDebug: isDebug }), function(s) {
             var result = JSON.parse(s);
             try {
                 if (isDebug) {
@@ -60,7 +60,7 @@ var slickJsonOutAPI = function(contentKey, param, slickParam, isDebug, query, cb
             } catch (e) {
                 cb(e, null, null);
             }*/
-        } });
+        });
     } catch (e) {
         cb(e, null);
     }
