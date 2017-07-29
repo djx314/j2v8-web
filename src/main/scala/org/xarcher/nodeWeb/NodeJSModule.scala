@@ -32,28 +32,22 @@ trait NodeJSModule {
 
   lazy val nodeJSF: Future[NodeJS] = {
     CopyHelper.copyFromClassPath("org/xarcher/nodeEnv/assets", temDir).flatMap { _ =>
-      val nodeJSImpl = NodeJS.createNodeJS()
       Future {
-        val nodeJS2 = NodeJS.createNodeJS()
-        nodeJS2
+        NodeJS.createNodeJS()
       }(dustExecution)
     }
   }
 
   lazy val v8F: Future[V8] = {
-    val v8FImpl = nodeJSF.map { nodeJS =>
-      val v8Impl = nodeJS.getRuntime
-      v8Impl
+    nodeJSF.map { nodeJS =>
+      nodeJS.getRuntime
     }(dustExecution)
-    v8FImpl
   }
 
   lazy val moduleF: Future[V8Object] = {
-    val modeleFImpl = nodeJSF.map { nodeJS =>
-      val moduleImpl = nodeJS.require(temDir.resolve("dustTest.js").toFile)
-      moduleImpl
+    nodeJSF.map { nodeJS =>
+      nodeJS.require(temDir.resolve("play-dust-bridge.js").toFile)
     }(dustExecution)
-    modeleFImpl
   }
 
   applicationLifecycle.addStopHook { () =>

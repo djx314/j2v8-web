@@ -5,14 +5,13 @@ import java.nio.charset.Charset
 import java.nio.file.Files
 import javax.inject.Singleton
 
-import com.eclipsesource.v8
 import org.xarcher.urlParser.{ InfoWrap, ParseResult }
 import play.api.mvc.{ AnyContent, Request }
 import play.api.inject.ApplicationLifecycle
 
 import scala.collection.JavaConverters._
-import scala.concurrent.{ Await, ExecutionContext, Future, Promise }
-import scala.util.{ Failure, Success, Try }
+import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.util.{ Failure, Success }
 
 trait AsyncContentCols {
   val contentMap: Map[String, AsyncContent]
@@ -26,7 +25,7 @@ trait DustGen {
 
 trait DustEngine {
 
-  def renderString: Future[DustGen]
+  def renderString: DustGen
 
 }
 
@@ -43,7 +42,7 @@ class DustEngineImpl @javax.inject.Inject() (
   override def dustExecution = dustExecutionWrap.singleThread
   override val defaultExecutionContext = ec
 
-  def renderString = {
+  override def renderString = {
     if (templateConfigure.isNodeProd) {
       lazytRenderString
     } else {
@@ -51,14 +50,19 @@ class DustEngineImpl @javax.inject.Inject() (
     }
   }
 
-  private lazy val lazytRenderString = defRenderString
+  private lazy val lazytRenderString = {
+    defRenderString
+  }
 
   def addPropertyTemplateString(v8: V8) = {
     val propertyTemplateString = Files.readAllLines(temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
     Future {
       v8.add("propertyTemplateString", propertyTemplateString)
+      propertyTemplateString
     }(dustExecution)
   }
+
+  lazy val addPropertyTemplateStringAction: Future[String] = v8F.flatMap(addPropertyTemplateString)
 
   def releaseJSObject(v8Obj: V8Object): Future[Boolean] = {
     Future {
@@ -76,199 +80,186 @@ class DustEngineImpl @javax.inject.Inject() (
     }
   }
 
-  private def defRenderString: Future[DustGen] = (for {
-    nodeJS <- nodeJSF
-    v8 <- v8F
-    _ <- addPropertyTemplateString(v8)
-    module <- moduleF
-  } yield {
-    (nodeJS, v8, module)
-  }).flatMap {
-    case (nodeJS, v8, module) =>
-      val paramConvert = Future {
+  private def defRenderString: DustGen = {
+    (content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: AsyncContent, isDebug: Boolean) =>
+      (for {
+        nodeJS <- nodeJSF
+        v8 <- v8F
+        propertyString <- addPropertyTemplateStringAction
+        module <- moduleF
+      } yield Future {
 
-        val tempStr1 = Files.readAllLines(temDir.resolve("totalTemplate.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
+        val tempStr1 = propertyString
         module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
+        var execQuery: V8Function = null
+        var v8Query: V8Object = null
+        var v8Request: V8Object = null
+        var successCallback: V8Function = null
+        var failureCallback: V8Function = null
+        var v8Promise: V8Object = null
+        var remoteJsonQuery: V8Function = null
 
-        new DustGen {
+        Future {
+          v8Query = new V8Object(v8)
+          val queryMap: Map[String, AsyncContent] = contents.contentMap.map { case (key, cntentApply) => key -> cntentApply }
 
-          override def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: AsyncContent, isDebug: Boolean): Future[String] = {
-            var execQuery: V8Function = null
-            var v8Query: V8Object = null
-            var v8Request: V8Object = null
-            var successCallback: V8Function = null
-            var failureCallback: V8Function = null
-            var v8Promise: V8Object = null
-            var remoteJsonQuery: V8Function = null
-
-            Future {
-              v8Query = new V8Object(v8)
-              val queryMap: Map[String, AsyncContent] = contents.contentMap.map { case (key, cntentApply) => key -> cntentApply }
-
-              execQuery = new V8Function(v8, new JavaCallback {
-                override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-                  val key = parameters.getString(0)
-                  val param = parameters.getString(1)
-                  val callback = parameters.getObject(2)
-                  queryMap.get(key) match {
-                    case Some(query) =>
-                      query.exec(param, request).map { s =>
-                        s match {
-                          case Left(e) =>
-                            throw e
-                          case Right(data) =>
-                            callback.executeJSFunction("callback", data)
-                        }
-                      }(dustExecution).andThen {
-                        case Success(_) =>
-                          callback.release()
-                        case scala.util.Failure(e) =>
-                          e.printStackTrace()
-                          callback.release()
-                      }(dustExecution)
-                      null
-                    case _ =>
-                      callback.release()
-                      throw new Exception(s"找不到键：${key}对应的查询方案")
-                      null
-                  }
-                }
-
-              })
-
-              remoteJsonQuery = new V8Function(v8, new JavaCallback {
-                override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-                  val serverData = parameters.getString(0)
-                  val callback = parameters.get(1).asInstanceOf[V8Function]
-                  val callBackParams = new V8Array(v8)
-                  serverDataContent.exec(serverData, request).map { s =>
+          execQuery = new V8Function(v8, new JavaCallback {
+            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
+              val key = parameters.getString(0)
+              val param = parameters.getString(1)
+              val callback = parameters.getObject(2)
+              queryMap.get(key) match {
+                case Some(query) =>
+                  query.exec(param, request).map { s =>
                     s match {
                       case Left(e) =>
-                        callBackParams.pushNull()
-                        callBackParams.push(e.getMessage)
-                        callback.call(null, callBackParams)
+                        throw e
                       case Right(data) =>
-                        callBackParams.push(data)
-                        callBackParams.pushNull()
-                        callback.call(null, callBackParams)
+                        callback.executeJSFunction("callback", data)
                     }
-                    true
                   }(dustExecution).andThen {
-                    case Success(_: Boolean) =>
-                      for {
-                        _ <- releaseJSObject(callback)
-                        _ <- releaseJSObject(callBackParams)
-                      } yield {
-                        true
-                      }
+                    case Success(_) =>
+                      callback.release()
                     case scala.util.Failure(e) =>
-                      logger.error("执行 Remote Json 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
-                      for {
-                        _ <- releaseJSObject(callback)
-                        _ <- releaseJSObject(callBackParams)
-                      } yield {
-                        true
-                      }
-                  }
+                      e.printStackTrace()
+                      callback.release()
+                  }(dustExecution)
                   null
-                }
-              })
-
-              v8Request = new V8Object(v8)
-
-              parseResult.infos.foreach {
-                case InfoWrap(url, path, typeRef) =>
-                  typeRef match {
-                    case "String" => v8Request.add(path, url)
-                    case "Boolean" => v8Request.add(path, java.lang.Boolean.valueOf(url))
-                    case "Int" => v8Request.add(path, Integer.valueOf(url))
-                    case "Double" => v8Request.add(path, java.lang.Double.valueOf(url))
-                    case _ => throw new Exception("不可识别的参数类型")
-                  }
-              }
-
-              request.queryString.foreach {
-                case (key, values) =>
-                  v8Request.add(key, values(0))
-              }
-
-              v8Query.add("query", execQuery)
-              v8Query.add("request", v8Request)
-              v8Query.add("remoteJson", remoteJsonQuery)
-
-              val promise = Promise[String]
-              val resultFuture = promise.future
-              v8Promise = new V8Object(v8)
-
-              successCallback = new V8Function(v8, new JavaCallback() {
-                override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-                  try {
-                    promise.success(parameters.getString(0))
-                    null
-                  } catch {
-                    case e: Exception =>
-                      e.printStackTrace()
-                      null
-                  }
-                }
-              })
-
-              failureCallback = new V8Function(v8, new JavaCallback() {
-                override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-                  try {
-                    promise.failure(new Exception(parameters.getString(0)))
-                    null
-                  } catch {
-                    case e: Exception =>
-                      e.printStackTrace()
-                      null
-                  }
-                }
-              })
-
-              v8Promise.add("success", successCallback)
-
-              v8Promise.add("failure", failureCallback)
-
-              module.executeJSFunction("outPut", content, param, isDebug.asInstanceOf[Object], v8Query, v8Promise)
-              resultFuture
-            }(dustExecution).flatMap(identity)(dustExecution)
-              .recoverWith {
-                case e: Exception =>
-                  logger.error("渲染 dust 模板发生不可预料的错误", e)
-                  val newE = new Exception(s"渲染 dust 模板发生不可预料的错误,错误信息\n:${e.getMessage}")
-                  newE.initCause(e)
-                  Future.failed(newE)
-              }
-              .andThen {
                 case _ =>
-                  Future {
-                    nodeJS.handleMessage()
-                  }(dustExecution).flatMap { _ =>
-                    for {
-                      _ <- releaseJSObject(execQuery)
-                      _ <- releaseJSObject(remoteJsonQuery)
-                      _ <- releaseJSObject(v8Query)
-                      _ <- releaseJSObject(v8Request)
-                      _ <- releaseJSObject(successCallback)
-                      _ <- releaseJSObject(failureCallback)
-                      _ <- releaseJSObject(v8Promise)
-                    } yield {
-                      true
-                    }
+                  callback.release()
+                  throw new Exception(s"找不到键：${key}对应的查询方案")
+                  null
+              }
+            }
+
+          })
+
+          remoteJsonQuery = new V8Function(v8, new JavaCallback {
+            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
+              val serverData = parameters.getString(0)
+              val callback = parameters.get(1).asInstanceOf[V8Function]
+              val callBackParams = new V8Array(v8)
+              serverDataContent.exec(serverData, request).map { s =>
+                s match {
+                  case Left(e) =>
+                    callBackParams.pushNull()
+                    callBackParams.push(e.getMessage)
+                    callback.call(null, callBackParams)
+                  case Right(data) =>
+                    callBackParams.push(data)
+                    callBackParams.pushNull()
+                    callback.call(null, callBackParams)
+                }
+                true
+              }(dustExecution).andThen {
+                case Success(_: Boolean) =>
+                  for {
+                    _ <- releaseJSObject(callback)
+                    _ <- releaseJSObject(callBackParams)
+                  } yield {
+                    true
                   }
-                    .andThen {
-                      case Failure(e) =>
-                        e.printStackTrace
-                      case Success(_: Boolean) =>
-                    }
+                case scala.util.Failure(e) =>
+                  logger.error("执行 Remote Json 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
+                  for {
+                    _ <- releaseJSObject(callback)
+                    _ <- releaseJSObject(callBackParams)
+                  } yield {
+                    true
+                  }
+              }
+              null
+            }
+          })
+
+          v8Request = new V8Object(v8)
+
+          parseResult.infos.foreach {
+            case InfoWrap(url, path, typeRef) =>
+              typeRef match {
+                case "String" => v8Request.add(path, url)
+                case "Boolean" => v8Request.add(path, java.lang.Boolean.valueOf(url))
+                case "Int" => v8Request.add(path, Integer.valueOf(url))
+                case "Double" => v8Request.add(path, java.lang.Double.valueOf(url))
+                case _ => throw new Exception("不可识别的参数类型")
               }
           }
 
-        }
-      }(dustExecution)
+          request.queryString.foreach {
+            case (key, values) =>
+              v8Request.add(key, values(0))
+          }
 
-      paramConvert
+          v8Query.add("query", execQuery)
+          v8Query.add("request", v8Request)
+          v8Query.add("remoteJson", remoteJsonQuery)
+
+          val promise = Promise[String]
+          val resultFuture = promise.future
+          v8Promise = new V8Object(v8)
+
+          successCallback = new V8Function(v8, new JavaCallback() {
+            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
+              try {
+                promise.success(parameters.getString(0))
+                null
+              } catch {
+                case e: Exception =>
+                  e.printStackTrace()
+                  null
+              }
+            }
+          })
+
+          failureCallback = new V8Function(v8, new JavaCallback() {
+            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
+              try {
+                promise.failure(new Exception(parameters.getString(0)))
+                null
+              } catch {
+                case e: Exception =>
+                  e.printStackTrace()
+                  null
+              }
+            }
+          })
+
+          v8Promise.add("success", successCallback)
+
+          v8Promise.add("failure", failureCallback)
+
+          module.executeJSFunction("outPut", content, param, isDebug.asInstanceOf[Object], v8Query, v8Promise)
+          resultFuture
+        }(dustExecution).flatMap(identity)(dustExecution)
+          .andThen {
+            case _ =>
+              (Future {
+                nodeJS.handleMessage()
+              }(dustExecution).flatMap { _ =>
+                for {
+                  _ <- releaseJSObject(execQuery)
+                  _ <- releaseJSObject(remoteJsonQuery)
+                  _ <- releaseJSObject(v8Query)
+                  _ <- releaseJSObject(v8Request)
+                  _ <- releaseJSObject(successCallback)
+                  _ <- releaseJSObject(failureCallback)
+                  _ <- releaseJSObject(v8Promise)
+                } yield true
+              }.recover {
+                case e: Exception =>
+                  e.printStackTrace
+                  false
+              }): Future[Boolean]
+          }
+      }(dustExecution))
+        .flatten.flatten
+        .recoverWith {
+          case e: Exception =>
+            logger.error("渲染 dust 模板发生不可预料的错误", e)
+            val newE = new Exception(s"渲染 dust 模板发生不可预料的错误,错误信息\n:${e.getMessage}")
+            newE.initCause(e)
+            Future.failed(newE)
+        }
   }
 
 }
