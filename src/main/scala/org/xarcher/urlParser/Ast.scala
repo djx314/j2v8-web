@@ -57,6 +57,9 @@ class UrlParserImpl(val snippets: List[String], val urlAbs: List[UrlAbs], val qu
             }
         }
       }
+      if (si.hasNext) {
+        throw (ParseFailed(""))
+      }
       Right(ParseResult(listBuffer.toList, queryPlans, si.toList))
     } catch {
       case e: Exception =>

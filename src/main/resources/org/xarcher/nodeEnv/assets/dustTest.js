@@ -66,14 +66,31 @@ var slickJsonOutAPI = function(contentKey, param, slickParam, isDebug, query, cb
     }
 };
 
-var serverDataRequest = function(serverKey, param, query, cb) {
+var remoteJsonRequest = function(serverKey, param, query, cb) {
     try {
-        query.serverData(JSON.stringify({ serverKey: serverKey, data: param }), { callback: function(s) {
-            var result = JSON.parse(s);
-            cb(result);
-        } });
+        query.remoteJson(JSON.stringify({ serverKey: serverKey, data: param }), function(successStr, errorStr) {
+            if (typeof errorStr === "string") {
+                cb(null, errorStr);
+            } else if (typeof successStr === "string") {
+                //初始化为 undefined 类型，应对 json 解析失败的情况
+                var result = undefined;
+                try {
+                    result = JSON.parse(successStr);
+                } catch(e) {
+                    console.log(e);
+                }
+                if (typeof result === "object") {
+                    cb(result, null);
+                } else {
+                    cb(null, "响应的数据不能解析成 json")
+                }
+            } else {
+                cb(null, "不可识别的响应类型和错误数据类型")
+            }
+        });
     } catch (e) {
-        cb(e, null);
+        //cb(e, null);
+        console.log(e);
     }
 };
 
@@ -114,16 +131,21 @@ dust.helpers.playRequest = function(chunk, context, bodies, params) {
     });
 };
 
-dust.helpers.serverData = function(chunk, context, bodies, params) {
+dust.helpers.remoteJson = function(chunk, context, bodies, params) {
     var key = context.resolve(params.key);
     delete params.key;
 
-    var aa = chunk.map(function(inChunk) {
-        serverDataRequest(key, params, context.get("scala-query"), function(result) {
-            inChunk.render(bodies.block, context.push({ content: result })).end();
+    return chunk.map(function(inChunk) {
+        remoteJsonRequest(key, params, context.get("scala-query"), function(result, errStr) {
+            if (typeof errStr === "string") {
+                inChunk.end("渲染发生错误,错误信息:" + errStr);
+            } else if (typeof result === "object") {
+                inChunk.render(bodies.block, context.push({ content: result })).end();
+            } else {
+                inChunk.end("渲染错误,错误信息和数据皆不合法");
+            }
         });
     });
-    return aa;
 };
 
 dust.filters.d = function(value) {
@@ -154,17 +176,6 @@ var outPut = function(inPut, param, isDebug, query, promise) {
 
     requestParam["scala-isDebug"] = isDebug;
     requestParam["scala-query"] = query;
-
-    /*var request = new Proxy({}, {
-        get: function (target, key, receiver) {
-            console.log(`getting ${key}!`);
-            return query.getParam(key);
-        },
-        set: function (target, key, value, receiver) {
-            console.log(`setting ${key}!`);
-            return null;
-        }
-    });*/
 
     requestParam["scala-request"] = query.request;
 

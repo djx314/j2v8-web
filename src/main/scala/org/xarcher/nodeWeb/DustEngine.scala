@@ -1,19 +1,17 @@
 package org.xarcher.nodeWeb
 
 import com.eclipsesource.v8._
-
 import java.nio.charset.Charset
 import java.nio.file.Files
-
 import javax.inject.Singleton
 
+import com.eclipsesource.v8
 import org.xarcher.urlParser.{ InfoWrap, ParseResult }
-
 import play.api.mvc.{ AnyContent, Request }
 import play.api.inject.ApplicationLifecycle
 
 import scala.collection.JavaConverters._
-import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.concurrent.{ Await, ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Success, Try }
 
 trait AsyncContentCols {
@@ -62,10 +60,26 @@ class DustEngineImpl @javax.inject.Inject() (
     }(dustExecution)
   }
 
+  def releaseJSObject(v8Obj: V8Object): Future[Boolean] = {
+    Future {
+      if (v8Obj ne null) {
+        v8Obj.release()
+        true
+      } else {
+        logger.warn("对象未正确创建，取消回收")
+        true
+      }
+    }(dustExecution).recover {
+      case e: Exception =>
+        logger.warn("回收 js 对象出现错误", e)
+        false
+    }
+  }
+
   private def defRenderString: Future[DustGen] = (for {
     nodeJS <- nodeJSF
     v8 <- v8F
-    _ = addPropertyTemplateString(v8)
+    _ <- addPropertyTemplateString(v8)
     module <- moduleF
   } yield {
     (nodeJS, v8, module)
@@ -85,7 +99,7 @@ class DustEngineImpl @javax.inject.Inject() (
             var successCallback: V8Function = null
             var failureCallback: V8Function = null
             var v8Promise: V8Object = null
-            var serverDataQuery: V8Function = null
+            var remoteJsonQuery: V8Function = null
 
             Future {
               v8Query = new V8Object(v8)
@@ -122,27 +136,42 @@ class DustEngineImpl @javax.inject.Inject() (
 
               })
 
-              serverDataQuery = new V8Function(v8, new JavaCallback {
+              remoteJsonQuery = new V8Function(v8, new JavaCallback {
                 override def invoke(receiver: V8Object, parameters: V8Array): Object = {
                   val serverData = parameters.getString(0)
-                  val callback = parameters.getObject(1)
+                  val callback = parameters.get(1).asInstanceOf[V8Function]
+                  val callBackParams = new V8Array(v8)
                   serverDataContent.exec(serverData, request).map { s =>
                     s match {
                       case Left(e) =>
-                        throw e
+                        callBackParams.pushNull()
+                        callBackParams.push(e.getMessage)
+                        callback.call(null, callBackParams)
                       case Right(data) =>
-                        callback.executeJSFunction("callback", data)
+                        callBackParams.push(data)
+                        callBackParams.pushNull()
+                        callback.call(null, callBackParams)
                     }
+                    true
                   }(dustExecution).andThen {
-                    case Success(_) =>
-                      callback.release()
+                    case Success(_: Boolean) =>
+                      for {
+                        _ <- releaseJSObject(callback)
+                        _ <- releaseJSObject(callBackParams)
+                      } yield {
+                        true
+                      }
                     case scala.util.Failure(e) =>
-                      e.printStackTrace()
-                      callback.release()
-                  }(dustExecution)
+                      logger.error("执行 Remote Json 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
+                      for {
+                        _ <- releaseJSObject(callback)
+                        _ <- releaseJSObject(callBackParams)
+                      } yield {
+                        true
+                      }
+                  }
                   null
                 }
-
               })
 
               v8Request = new V8Object(v8)
@@ -165,7 +194,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
               v8Query.add("query", execQuery)
               v8Query.add("request", v8Request)
-              v8Query.add("serverData", serverDataQuery)
+              v8Query.add("remoteJson", remoteJsonQuery)
 
               val promise = Promise[String]
               val resultFuture = promise.future
@@ -198,43 +227,41 @@ class DustEngineImpl @javax.inject.Inject() (
               })
 
               v8Promise.add("success", successCallback)
+
               v8Promise.add("failure", failureCallback)
 
               module.executeJSFunction("outPut", content, param, isDebug.asInstanceOf[Object], v8Query, v8Promise)
               resultFuture
             }(dustExecution).flatMap(identity)(dustExecution)
+              .recoverWith {
+                case e: Exception =>
+                  logger.error("渲染 dust 模板发生不可预料的错误", e)
+                  val newE = new Exception(s"渲染 dust 模板发生不可预料的错误,错误信息\n:${e.getMessage}")
+                  newE.initCause(e)
+                  Future.failed(newE)
+              }
               .andThen {
                 case _ =>
                   Future {
                     nodeJS.handleMessage()
-
-                    def closeJSAssets(v8Obj: V8Object): Boolean = {
-                      if (v8Obj ne null) Try {
-                        v8Obj.release()
-                        true
-                      } match {
-                        case Failure(e) =>
-                          logger.warn("回收 js 对象出现错误", e)
-                          false
-                        case Success(s) => s
-                      }
-                      else {
-                        logger.warn("对象未正确创建，取消回收")
-                        true
-                      }
+                  }(dustExecution).flatMap { _ =>
+                    for {
+                      _ <- releaseJSObject(execQuery)
+                      _ <- releaseJSObject(remoteJsonQuery)
+                      _ <- releaseJSObject(v8Query)
+                      _ <- releaseJSObject(v8Request)
+                      _ <- releaseJSObject(successCallback)
+                      _ <- releaseJSObject(failureCallback)
+                      _ <- releaseJSObject(v8Promise)
+                    } yield {
+                      true
                     }
-
-                    closeJSAssets(execQuery)
-                    closeJSAssets(serverDataQuery)
-                    closeJSAssets(v8Query)
-                    closeJSAssets(v8Request)
-                    closeJSAssets(successCallback)
-                    closeJSAssets(failureCallback)
-                    closeJSAssets(v8Promise)
-                  }(dustExecution).andThen {
-                    case Failure(e) =>
-                      e.printStackTrace
                   }
+                    .andThen {
+                      case Failure(e) =>
+                        e.printStackTrace
+                      case Success(_: Boolean) =>
+                    }
               }
           }
 
