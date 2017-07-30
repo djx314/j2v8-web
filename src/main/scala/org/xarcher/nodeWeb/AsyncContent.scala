@@ -1,23 +1,17 @@
 package org.xarcher.nodeWeb
 
-import io.circe.Decoder
-import io.circe.parser
-import io.circe.syntax._
-import io.circe.generic.auto._
-import net.scalax.fsn.slick.model.JsonOut
+import io.circe.Json
 import play.api.mvc.{ AnyContent, Request }
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.Future
 
 trait AsyncContent {
 
-  def exec(content: String, request: Request[AnyContent]): Future[Either[Exception, String]]
+  def exec(content: Json, request: Request[AnyContent]): Future[Either[Exception, Json]]
 
 }
-
-case class AsyncParam[T](param: T, slickParam: String, isDebug: Boolean)
-
-trait AsyncJsonContent extends AsyncContent {
+//case class AsyncParam[T](param: T, slickParam: String, isDebug: Boolean)
+/*trait AsyncJsonContent extends AsyncContent {
 
   type ParamType
   implicit val decoder: Decoder[ParamType]
@@ -37,14 +31,11 @@ trait AsyncJsonContent extends AsyncContent {
     }
   }
 
-}
-
-trait AsyncJsonContentImpl[T] extends AsyncJsonContent {
+}*/
+/*trait AsyncJsonContentImpl[T] extends AsyncContent {
   override type ParamType = T
 }
-
 //case class PageParam[T](param: T, slickParam: Option[SlickParam])
-
 trait AsyncJsonOutContent[T] extends AsyncJsonContentImpl[T] {
 
   val db: slick.basic.BasicBackend#Database
@@ -71,7 +62,6 @@ trait AsyncJsonOutContent[T] extends AsyncJsonContentImpl[T] {
   }
 
 }
-
 object AsyncContent {
 
   def jsonOutContent[T](jsonOut: (T, Request[AnyContent]) => Future[JsonOut], db1: slick.basic.BasicBackend#Database)(implicit decoder1: Decoder[T], ec1: ExecutionContext): AsyncJsonOutContent[T] = {
@@ -102,4 +92,4 @@ object AsyncContent {
     }
   }
 
-}
+}*/ 

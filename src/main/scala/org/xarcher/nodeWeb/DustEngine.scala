@@ -19,7 +19,7 @@ trait AsyncContentCols {
 
 trait DustGen {
 
-  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: AsyncContent, isDebug: Boolean): Future[String]
+  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, /*serverDataContent: AsyncContent,*/ isDebug: Boolean): Future[String]
 
 }
 
@@ -33,7 +33,7 @@ trait DustEngine {
 class DustEngineImpl @javax.inject.Inject() (
     applicationLifecycle1: ApplicationLifecycle,
     templateConfigure: TemplateConfigure,
-    //common: ControllerComponents,
+    asyncContents: AsyncContentCols,
     dustExecutionWrap: DustExecution
 )(implicit ec: ExecutionContext) extends NodeJSModule with DustEngine {
 
@@ -41,7 +41,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
   override def dustExecution = dustExecutionWrap.singleThread
   override val defaultExecutionContext = ec
-
+  override val asyncContentCols = asyncContents
   override def renderString = {
     if (templateConfigure.isNodeProd) {
       lazytRenderString
@@ -88,7 +88,7 @@ class DustEngineImpl @javax.inject.Inject() (
   }
 
   private def defRenderString: DustGen = {
-    (content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, contents: AsyncContentCols, serverDataContent: AsyncContent, isDebug: Boolean) =>
+    (content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, /*contents: AsyncContentCols, serverDataContent: AsyncContent,*/ isDebug: Boolean) =>
       (for {
         nodeJS <- nodeJSF
         v8 <- v8F
@@ -103,11 +103,11 @@ class DustEngineImpl @javax.inject.Inject() (
         var successCallback: V8Function = null
         var failureCallback: V8Function = null
         var v8Promise: V8Object = null
-        var remoteJsonQuery: V8Function = null
+        //var remoteJsonQuery: V8Function = null
 
         Future {
           v8Query = new V8Object(v8)
-          val queryMap: Map[String, AsyncContent] = contents.contentMap.map { case (key, cntentApply) => key -> cntentApply }
+          val queryMap: Map[String, AsyncContent] = asyncContents.contentMap //.map { case (key, cntentApply) => key -> cntentApply }
 
           execQuery = new V8Function(v8, new JavaCallback {
             override def invoke(receiver: V8Object, parameters: V8Array): Object = {
@@ -117,12 +117,15 @@ class DustEngineImpl @javax.inject.Inject() (
               val callBackParams = new V8Array(v8)
               queryMap.get(key) match {
                 case Some(query) =>
-                  (query.exec(param, request).map { s =>
+                  (query.exec(io.circe.parser.parse(param).right.get, request).map { s =>
                     s match {
                       case Left(e) =>
-                        throw e
+                        callBackParams.pushNull()
+                        callBackParams.push(e.getMessage)
+                        callback.call(null, callBackParams)
                       case Right(data) =>
-                        callBackParams.push(data)
+                        callBackParams.push(data.noSpaces)
+                        callBackParams.pushNull()
                         callback.call(null, callBackParams)
                     }
                     true
@@ -155,7 +158,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
           })
 
-          remoteJsonQuery = new V8Function(v8, new JavaCallback {
+          /*remoteJsonQuery = new V8Function(v8, new JavaCallback {
             override def invoke(receiver: V8Object, parameters: V8Array): Object = {
               val serverData = parameters.getString(0)
               val callback = parameters.get(1).asInstanceOf[V8Function]
@@ -189,7 +192,7 @@ class DustEngineImpl @javax.inject.Inject() (
               }): Future[Boolean]
               null
             }
-          })
+          })*/
 
           v8Request = new V8Object(v8)
 
@@ -211,7 +214,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
           v8Query.add("query", execQuery)
           v8Query.add("request", v8Request)
-          v8Query.add("remoteJson", remoteJsonQuery)
+          //v8Query.add("remoteJson", remoteJsonQuery)
 
           val promise = Promise[String]
           val resultFuture = promise.future
@@ -257,7 +260,7 @@ class DustEngineImpl @javax.inject.Inject() (
               }(dustExecution).flatMap { _ =>
                 for {
                   _ <- releaseJSObject(execQuery)
-                  _ <- releaseJSObject(remoteJsonQuery)
+                  //_ <- releaseJSObject(heperNames)
                   _ <- releaseJSObject(v8Query)
                   _ <- releaseJSObject(v8Request)
                   _ <- releaseJSObject(successCallback)
