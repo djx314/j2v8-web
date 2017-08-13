@@ -14,6 +14,12 @@ libraryDependencies ++= {
   )
 }
 
+libraryDependencies ++= {
+  Seq(
+    "org.webjars.npm" % "dustjs-linkedin" % "2.7.2" exclude("org.webjars.npm", "chokidar") exclude("org.webjars.npm", "cli")
+  )
+}
+
 val circeVersion = "0.8.0"
 
 libraryDependencies ++= Seq(

@@ -5,6 +5,7 @@ import java.nio.charset.Charset
 import java.nio.file.Files
 import javax.inject.Singleton
 
+import org.slf4j.LoggerFactory
 import org.xarcher.urlParser.{ InfoWrap, ParseResult }
 import play.api.mvc.{ AnyContent, Request }
 import play.api.inject.ApplicationLifecycle
@@ -31,17 +32,23 @@ trait DustEngine {
 
 @Singleton
 class DustEngineImpl @javax.inject.Inject() (
-    applicationLifecycle1: ApplicationLifecycle,
+    applicationLifecycle: ApplicationLifecycle,
     templateConfigure: TemplateConfigure,
     asyncContents: AsyncContentCols,
     dustExecutionWrap: DustExecution
-)(implicit ec: ExecutionContext) extends NodeJSModule with DustEngine {
+)(implicit ec: ExecutionContext) extends DustEngine {
 
-  override def applicationLifecycle = applicationLifecycle1
+  val logger = LoggerFactory.getLogger(classOf[DustEngine])
 
-  override def dustExecution = dustExecutionWrap.singleThread
-  override val defaultExecutionContext = ec
-  override val asyncContentCols = asyncContents
+  //override def applicationLifecycle = applicationLifecycle1
+
+  lazy val dustModule = {
+    val module = NodeJSModule.create(asyncContents)(dustExecutionWrap.singleThread)(ec)
+    applicationLifecycle.addStopHook { () =>
+      Future.successful(module.close)
+    }
+    module
+  }
   override def renderString = {
     if (templateConfigure.isNodeProd) {
       lazytRenderString
@@ -58,21 +65,25 @@ class DustEngineImpl @javax.inject.Inject() (
 
   }
 
-  lazy val addTemplateAction = moduleF.map { module =>
-    val propertyTemplateString = Files.readAllLines(temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
-    val tempStr1 = propertyTemplateString
-    module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
-    tempStr1
-  }(dustExecution)
+  lazy val addTemplateAction = dustModule.moduleF.flatMap { module =>
+    dustModule.execV8Job {
+      val propertyTemplateString = Files.readAllLines(dustModule.temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
+      val tempStr1 = propertyTemplateString
+      module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
+      tempStr1
+    }
+  }
 
-  lazy val addPropertyTemplateStringAction: Future[String] = v8F.map { v8 =>
-    val propertyTemplateString = Files.readAllLines(temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
-    v8.add("propertyTemplateString", propertyTemplateString)
-    propertyTemplateString
-  }(dustExecution)
+  /*lazy val addPropertyTemplateStringAction: Future[String] = dustModule.v8F.flatMap { v8 =>
+    dustModule.execV8Job {
+      val propertyTemplateString = Files.readAllLines(dustModule.temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
+      v8.add("propertyTemplateString", propertyTemplateString)
+      propertyTemplateString
+    }
+  }*/
 
   def releaseJSObject(v8Obj: V8Object): Future[Boolean] = {
-    Future {
+    dustModule.execV8Job {
       if (v8Obj ne null) {
         v8Obj.release()
         true
@@ -80,7 +91,7 @@ class DustEngineImpl @javax.inject.Inject() (
         logger.warn("对象未正确创建，取消回收")
         true
       }
-    }(dustExecution).recover {
+    }.recover {
       case e: Exception =>
         logger.warn("回收 js 对象出现错误", e)
         false
@@ -90,10 +101,10 @@ class DustEngineImpl @javax.inject.Inject() (
   private def defRenderString: DustGen = {
     (content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, /*contents: AsyncContentCols, serverDataContent: AsyncContent,*/ isDebug: Boolean) =>
       (for {
-        nodeJS <- nodeJSF
-        v8 <- v8F
-        _ <- addPropertyTemplateStringAction
-        module <- moduleF
+        nodeJS <- dustModule.nodeJSF
+        v8 <- dustModule.v8F
+        //_ <- addPropertyTemplateStringAction
+        module <- dustModule.moduleF
         _ <- addTemplateAction
       } yield {
 
@@ -105,7 +116,7 @@ class DustEngineImpl @javax.inject.Inject() (
         var v8Promise: V8Object = null
         //var remoteJsonQuery: V8Function = null
 
-        Future {
+        dustModule.execV8Job {
           v8Query = new V8Object(v8)
           val queryMap: Map[String, AsyncContent] = asyncContents.contentMap //.map { case (key, cntentApply) => key -> cntentApply }
 
@@ -117,19 +128,21 @@ class DustEngineImpl @javax.inject.Inject() (
               val callBackParams = new V8Array(v8)
               queryMap.get(key) match {
                 case Some(query) =>
-                  (query.exec(io.circe.parser.parse(param).right.get, request).map { s =>
-                    s match {
-                      case Left(e) =>
-                        callBackParams.pushNull()
-                        callBackParams.push(e.getMessage)
-                        callback.call(null, callBackParams)
-                      case Right(data) =>
-                        callBackParams.push(data.noSpaces)
-                        callBackParams.pushNull()
-                        callback.call(null, callBackParams)
+                  (query.exec(io.circe.parser.parse(param).right.get, request).flatMap { s =>
+                    dustModule.execV8Job {
+                      s match {
+                        case Left(e) =>
+                          callBackParams.pushNull()
+                          callBackParams.push(e.getMessage)
+                          callback.call(null, callBackParams)
+                        case Right(data) =>
+                          callBackParams.push(data.noSpaces)
+                          callBackParams.pushNull()
+                          callback.call(null, callBackParams)
+                      }
+                      true
                     }
-                    true
-                  }(dustExecution).andThen {
+                  }.andThen {
                     case s =>
                       (for {
                         _ <- releaseJSObject(callback)
@@ -252,12 +265,12 @@ class DustEngineImpl @javax.inject.Inject() (
 
           module.executeJSFunction("outPut", content, param, isDebug: java.lang.Boolean, v8Query, v8Promise)
           resultFuture
-        }(dustExecution).flatten
+        }.flatten
           .andThen {
             case _: Try[String] =>
-              (Future {
+              (dustModule.execV8Job {
                 nodeJS.handleMessage()
-              }(dustExecution).flatMap { _ =>
+              }.flatMap { _ =>
                 for {
                   _ <- releaseJSObject(execQuery)
                   //_ <- releaseJSObject(heperNames)

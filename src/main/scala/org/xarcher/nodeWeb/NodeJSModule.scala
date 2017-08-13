@@ -1,25 +1,21 @@
 package org.xarcher.nodeWeb
 
 import com.eclipsesource.v8._
-
 import java.nio.file.Paths
 import java.util.UUID
 
 import org.slf4j.LoggerFactory
 import org.xarcher.nodeWeb.modules.CopyHelper
 
-import play.api.inject.ApplicationLifecycle
+import scala.concurrent.{ Await, ExecutionContext, Future }
+import scala.util.{ Failure, Properties, Success }
 
-import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Properties, Success, Try }
+trait NodeJSModule extends AutoCloseable {
 
-trait NodeJSModule {
+  protected val dustExecution: ExecutionContext
+  implicit val defaultExecutionContext: ExecutionContext
 
-  protected def applicationLifecycle: ApplicationLifecycle
-  protected def dustExecution: ExecutionContext
-  protected implicit val defaultExecutionContext: ExecutionContext
-
-  val logger = LoggerFactory.getLogger(classOf[DustEngine])
+  val logger = LoggerFactory.getLogger(classOf[NodeJSModule])
 
   val temDir = {
     val tempPath = Properties.tmpDir
@@ -33,100 +29,147 @@ trait NodeJSModule {
   val asyncContentCols: AsyncContentCols
 
   lazy val helperNamesF: Future[V8Array] = {
-    v8F.map { v8 =>
-      val array = new V8Array(v8)
-      v8.add("helperNames", array)
-      asyncContentCols.contentMap.keys.foreach(s => array.push(s))
-      array
-    }(dustExecution)
+    mixRunTime.map(_._4)
   }
 
-  lazy val nodeJSF: Future[NodeJS] = {
-    CopyHelper.copyFromClassPath("org/xarcher/nodeEnv/assets", temDir).flatMap { _ =>
-      Future {
-        NodeJS.createNodeJS()
-      }(dustExecution)
+  lazy val copyAssetsAction = {
+    for {
+      (_: Boolean) <- CopyHelper.copyFromClassPath("org/xarcher/nodeEnv/assets", temDir)
+      (_: Boolean) <- CopyHelper.copyFromClassPath("META-INF/resources/webjars/dustjs-linkedin/2.7.2", Paths.get(temDir.toString, "node_modules/dustjs-linkedin"))
+    } yield {
+      true
     }
   }
 
+  protected lazy val mixRunTime: Future[(NodeJS, V8, V8Object, V8Array)] = {
+    copyAssetsAction.flatMap { (_: Boolean) =>
+      execV8Job {
+        val nodeJS = NodeJS.createNodeJS()
+        val v8 = nodeJS.getRuntime
+
+        val helperNames = new V8Array(v8)
+        asyncContentCols.contentMap.keys.foreach(s => helperNames.push(s))
+        v8.add("helperNames", helperNames)
+
+        val module = nodeJS.require(temDir.resolve("play-dust-bridge.js").toFile)
+        (nodeJS, v8, module, helperNames)
+      }
+    }
+  }
+
+  lazy val nodeJSF: Future[NodeJS] = {
+    mixRunTime.map(_._1)
+  }
+
   lazy val v8F: Future[V8] = {
-    nodeJSF.map { nodeJS =>
-      nodeJS.getRuntime
-    }(dustExecution)
+    mixRunTime.map(_._2)
   }
 
   lazy val moduleF: Future[V8Object] = {
-    nodeJSF.flatMap { nodeJS =>
-      helperNamesF.map { _ =>
-        nodeJS.require(temDir.resolve("play-dust-bridge.js").toFile)
-      }(dustExecution)
+    mixRunTime.map(_._3)
+  }
+
+  def execV8Job[T](job: => T): Future[T] = {
+    Future {
+      job
     }(dustExecution)
   }
 
-  applicationLifecycle.addStopHook { () =>
-    logger.info("开始回收 node 资源")
-    helperNamesF.map {
-      heplerNames =>
-        Try {
-          heplerNames.release()
-        } match {
-          case Success(_) =>
-            logger.info("回收 helper names 全局对象完毕")
-          case Failure(e) =>
-            logger.info("回收 helper names 全局对象发生错误", e)
-        }
-    }(dustExecution).recover {
-      case _ =>
-        logger.info("helper names 全局对象未正确初始化，跳过回收")
-    }.flatMap { (_: Unit) =>
-      moduleF.map {
-        module =>
-          Try {
-            module.release()
-          } match {
-            case Success(_) =>
-              logger.info("回收 dust 模块资源完毕")
-            case Failure(e) =>
-              logger.info("回收 dust 模块资源发生错误", e)
-          }
-      }(dustExecution).recover {
-        case _ =>
-          logger.info("dust 模块资源未正确初始化，跳过回收")
+  protected def releaseHeplerNames = helperNamesF.flatMap {
+    heplerNames =>
+      execV8Job {
+        heplerNames.release()
+      }.andThen {
+        case Success(_: Unit) =>
+          logger.info("回收 helper names 全局对象完毕")
+        case Failure(e) =>
+          logger.info("回收 helper names 全局对象发生错误", e)
       }
-    }.flatMap { (_: Unit) =>
-      nodeJSF.map {
-        nodeJS =>
-          Try {
-            nodeJS.release()
-          } match {
-            case Success(_) =>
-              logger.info("回收 NodeJS 全局对象完毕")
-            case Failure(e) =>
-              logger.info("回收 NodeJS 全局对象发生错误", e)
-          }
-      }(dustExecution).recover {
-        case _ =>
-          logger.info("NodeJS 全局对象未正确初始化，跳过回收")
-      }.flatMap { (_: Unit) =>
-        v8F.map {
-          v8 =>
-            Try {
-              v8.release()
-            } match {
-              case Success(_) =>
-                logger.info("回收 v8 全局对象完毕")
-              case Failure(e) =>
-                logger.info("回收 v8 全局对象发生错误", e)
-            }
-        }(dustExecution).recover {
-          case _ =>
-            logger.info("v8 全局对象未正确初始化，跳过回收")
-        }
-      }.map { (_: Unit) =>
-        logger.info("j2v8 资源回收完毕")
-      }
-    }: Future[Unit]
+  }.recover {
+    case _ =>
+      logger.info("helper names 全局对象未正确初始化，跳过回收")
+  }
 
+  protected def releaseModule = moduleF.flatMap {
+    module =>
+      execV8Job {
+        module.release()
+      }.andThen {
+        case Success(_: Unit) =>
+          logger.info("回收 dust 模块资源完毕")
+        case Failure(e) =>
+          logger.info("回收 dust 模块资源发生错误", e)
+      }
+  }.recover {
+    case _ =>
+      logger.info("dust 模块资源未正确初始化，跳过回收")
+  }
+
+  protected def releaseNodeJS = nodeJSF.flatMap {
+    nodeJS =>
+      execV8Job {
+        nodeJS.release()
+      }.andThen {
+        case Success(_: Unit) =>
+          logger.info("回收 NodeJS 全局对象完毕")
+        case Failure(e) =>
+          logger.info("回收 NodeJS 全局对象发生错误", e)
+      }
+  }.recover {
+    case _ =>
+      logger.info("NodeJS 全局对象未正确初始化，跳过回收")
+  }
+
+  protected def releaseV8 = v8F.flatMap {
+    v8 =>
+      execV8Job {
+        v8.release()
+      }.andThen {
+        case Success(_: Unit) =>
+          logger.info("回收 v8 全局对象完毕")
+        case Failure(e) =>
+          logger.info("回收 v8 全局对象发生错误", e)
+      }
+  }.recover {
+    case _ =>
+      logger.info("v8 全局对象未正确初始化，跳过回收")
+  }
+
+  override def close: Unit = {
+    logger.info("开始回收 node 资源")
+
+    val closeAction: Future[Unit] = (for {
+      (_: Unit) <- releaseHeplerNames
+      (_: Unit) <- releaseModule
+      (_: Unit) <- releaseNodeJS
+      (_: Unit) <- releaseV8
+    } yield {
+      ()
+    }).andThen {
+      case Success(_: Unit) =>
+        logger.info("j2v8 资源回收完毕")
+      case Failure(e) =>
+        logger.error("j2v8 资源回收出现未能处理的异常", e)
+    }
+
+    Await.result(closeAction, scala.concurrent.duration.Duration.Inf): Unit
+  }
+
+}
+
+object NodeJSModule {
+
+  def create(asyncContentCols: AsyncContentCols)(dustExecution: ExecutionContext)(defaultExecutionContext: ExecutionContext): NodeJSModule = {
+    val asyncContentCols1 = asyncContentCols
+    val dustExecution1 = dustExecution
+    val defaultExecutionContext1 = defaultExecutionContext
+    val module = new NodeJSModule {
+      override protected val dustExecution = dustExecution1
+      override val asyncContentCols = asyncContentCols1
+      override val defaultExecutionContext = defaultExecutionContext1
+    }
+    module.moduleF
+    module
   }
 
 }

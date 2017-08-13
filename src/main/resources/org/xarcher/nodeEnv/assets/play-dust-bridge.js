@@ -1,7 +1,7 @@
 "use strict";
 var dust = require("dustjs-helpers");
 
-var propertyTemplate = dust.loadSource(dust.compile(propertyTemplateString));
+//var propertyTemplate = dust.loadSource(dust.compile(propertyTemplateString));
 
 /*var slickJsonOutAPI = function(contentKey, param, slickParam, isDebug, query, cb) {
     try {

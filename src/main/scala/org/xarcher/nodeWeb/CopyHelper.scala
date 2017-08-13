@@ -41,12 +41,10 @@ object CopyHelper {
     Files.copy(input, path)
   }
 
-  def copyFilesFromJarFile(jarFile: JarFile, prefix: String, targetRoot: Path) = {
+  def copyFilesFromJarFile(jarFile: JarFile, prefix: String, targetRoot: Path): List[Long] = {
     val entries = jarFile.entries()
     val scalaEntries = entries.asScala.toStream
-    scalaEntries.filter { s =>
-      s.getName.startsWith(prefix) && (!s.isDirectory)
-    }.map { entry =>
+    scalaEntries.filter(s => s.getName.startsWith(prefix) && (!s.isDirectory)).map { entry =>
       var inputS: InputStream = null
       try {
         inputS = getClass.getClassLoader.getResourceAsStream(entry.getName)
