@@ -30,7 +30,7 @@ libraryDependencies ++= Seq(
 
 val playV = "2.6.2"
 
-libraryDependencies += "commons-io" % "commons-io" % "2.5"
+//libraryDependencies += "commons-io" % "commons-io" % "2.5"
 
 libraryDependencies += "com.typesafe.play" %% "play-guice" % playV
 //lazy val playVersion = play.core.PlayVersion.current

@@ -20,7 +20,7 @@ trait NodeJSModule extends AutoCloseable {
   val temDir = {
     val tempPath = Properties.tmpDir
     //存放不同版本 node 文件的根目录
-    val nodeRootDirName = "enuma_nodejs_temp"
+    val nodeRootDirName = "play_dust_nodejs_temp"
     val dirName = UUID.randomUUID().toString
     val tempJSRoot = Paths.get(tempPath, nodeRootDirName)
     tempJSRoot.resolve(dirName)
@@ -34,7 +34,7 @@ trait NodeJSModule extends AutoCloseable {
 
   lazy val copyAssetsAction = {
     for {
-      (_: Boolean) <- CopyHelper.copyFromClassPath("org/xarcher/nodeEnv/assets", temDir)
+      (_: Boolean) <- CopyHelper.copyFromClassPath("net/scalax/node_environment/assets", temDir)
       (_: Boolean) <- CopyHelper.copyFromClassPath("META-INF/resources/webjars/dustjs-linkedin/2.7.2", Paths.get(temDir.toString, "node_modules/dustjs-linkedin"))
     } yield {
       true

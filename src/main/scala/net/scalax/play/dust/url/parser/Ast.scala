@@ -79,7 +79,6 @@ object UrlDecoder {
    * @return 解析结果
    */
   def input(url: String, urlAbs: List[UrlAbs], queryPlans: List[Capture]): UrlParserImpl = {
-    //println(url.dropWhile(_ == '/').split('/').toList)
     //url 必须以 / 开头，如果不是，去掉 / 前面的部分
     new UrlParserImpl(url.dropWhile(_ == '/').split('/').toList, urlAbs, queryPlans)
   }

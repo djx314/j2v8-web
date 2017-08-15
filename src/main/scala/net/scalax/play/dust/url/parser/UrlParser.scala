@@ -25,8 +25,8 @@ class UrlParser(val input: ParserInput) extends Parser {
   def Brace = rule { "{" ~ CommonText ~ "}" }
 
   def CaptureBrance: Rule1[UrlAbs] = rule {
-    capture(PrefixText) ~ optional(Brace) ~ capture(SuffixText) ~ EOI ~>
-      { (prefix: String, captureOpt: Option[Capture], suffix: String) =>
+    capture(PrefixText) ~ optional(Brace) ~ capture(SuffixText) ~ EOI ~> {
+      (prefix: String, captureOpt: Option[Capture], suffix: String) =>
         captureOpt.map { capture =>
           if (prefix.isEmpty && suffix.isEmpty) {
             FullPath(capture)
@@ -38,7 +38,7 @@ class UrlParser(val input: ParserInput) extends Parser {
             SuffixPath(suffix, capture)
           }
         }.getOrElse(FullUrl(prefix + suffix))
-      }
+    }
   }
 
 }
