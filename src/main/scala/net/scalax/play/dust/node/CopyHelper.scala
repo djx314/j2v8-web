@@ -9,15 +9,13 @@ import java.util.jar.JarFile
 
 import org.slf4j.LoggerFactory
 
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext
 import scala.collection.JavaConverters._
 
 object CopyHelper {
 
   val logger = LoggerFactory.getLogger("dustjs.file.copy.helper")
 
-  def copyFromClassPath(path: String, targetRoot: Path)(implicit ec: ExecutionContext): Future[Boolean] = Future {
+  def copyFromClassPath(path: String, targetRoot: Path): Boolean = {
     Files.createDirectories(targetRoot)
     val classPathStr = path
     val sourURLs = getClass.getClassLoader.getResources(classPathStr).asScala.toStream

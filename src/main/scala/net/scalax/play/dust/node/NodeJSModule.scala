@@ -32,13 +32,10 @@ trait NodeJSModule extends AutoCloseable {
     mixRunTime.map(_._4)
   }
 
-  lazy val copyAssetsAction: Future[Boolean] = {
-    for {
-      (_: Boolean) <- CopyHelper.copyFromClassPath("net/scalax/node_environment/assets", temDir)
-      (_: Boolean) <- CopyHelper.copyFromClassPath("META-INF/resources/webjars/dustjs-linkedin/2.7.2", Paths.get(temDir.toString, "node_modules/dustjs-linkedin"))
-    } yield {
-      true
-    }
+  lazy val copyAssetsAction: Future[Boolean] = Future {
+    CopyHelper.copyFromClassPath("net/scalax/node_environment/assets", temDir)
+    CopyHelper.copyFromClassPath("META-INF/resources/webjars/dustjs-linkedin/2.7.2", Paths.get(temDir.toString, "node_modules/dustjs-linkedin"))
+    true
   }
 
   protected lazy val mixRunTime: Future[(NodeJS, V8, V8Object, V8Array)] = {
