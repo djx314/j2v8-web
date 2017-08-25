@@ -26,6 +26,8 @@ trait DustGen {
 
 trait DustEngine {
 
+  def addTemplate(templateName: String, content: String): Future[Boolean]
+
   def renderString: DustGen
 
 }
@@ -71,6 +73,20 @@ class DustEngineImpl @javax.inject.Inject() (
       val tempStr1 = propertyTemplateString
       module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
       tempStr1
+    }
+  }
+
+  def addTemplate(templateName: String, content: String): Future[Boolean] = {
+    dustModule.moduleF.flatMap { module =>
+      dustModule.execV8Job {
+        module.executeJSFunction("addTemplate", templateName, content)
+        logger.info(s"添加了名为:$templateName 的模板")
+        true
+      }
+    }.recover {
+      case e: Exception =>
+        logger.info("添加模板发生错误", e)
+        false
     }
   }
 
@@ -241,6 +257,7 @@ class DustEngineImpl @javax.inject.Inject() (
               } catch {
                 case e: Exception =>
                   logger.error("须处理的 j2v8 运行时错误", e)
+                  promise.failure(e)
                   null
               }
             }
@@ -254,6 +271,7 @@ class DustEngineImpl @javax.inject.Inject() (
               } catch {
                 case e: Exception =>
                   logger.error("须处理的 j2v8 运行时错误", e)
+                  promise.failure(e)
                   null
               }
             }

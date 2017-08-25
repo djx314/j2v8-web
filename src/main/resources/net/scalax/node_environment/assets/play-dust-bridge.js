@@ -188,7 +188,7 @@ var outPut = function(inPut, param, isDebug, query, promise) {
 
     dust.renderSource(inPut, requestParam, function(error, result) {
         if (error) {
-            promise.failure(error);
+            promise.failure(error.message);
         } else {
             promise.success(result);
         }
@@ -198,9 +198,9 @@ var outPut = function(inPut, param, isDebug, query, promise) {
 //添加模板方法，暴露给 java 使用
 var addTemplate = function(templateName, templateContent) {
     //编译模板，使用 templateName 作为 key。
-    var aabb = dust.compile(templateContent, templateName);
+    var compiledTemplate = dust.compile(templateContent, templateName);
     //注册模板
-    dust.loadSource(aabb);
+    dust.loadSource(compiledTemplate);
 };
 
 exports.outPut = outPut;
