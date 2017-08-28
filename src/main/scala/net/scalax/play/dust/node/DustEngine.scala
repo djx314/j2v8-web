@@ -4,13 +4,10 @@ import com.eclipsesource.v8._
 import javax.inject.Singleton
 
 import org.slf4j.LoggerFactory
-import org.xarcher.urlParser.{ InfoWrap, ParseResult }
-import play.api.mvc.{ AnyContent, Request }
 import play.api.inject.ApplicationLifecycle
 
-import scala.collection.JavaConverters._
 import scala.concurrent.{ ExecutionContext, Future, Promise }
-import scala.util.{ Failure, Try }
+import scala.util.Try
 
 trait AsyncContentCols {
   val contentMap: Map[String, AsyncContent]
@@ -18,7 +15,7 @@ trait AsyncContentCols {
 
 trait DustGen {
 
-  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean): Future[String]
+  def render(content: String, context: V8Object): Future[String]
   def addTemplate(templateName: String, content: String): Future[Boolean]
 
 }
@@ -26,6 +23,7 @@ trait DustGen {
 trait DustEngine {
 
   def renderString: DustGen
+  def dustModule: NodeJSModule
 
 }
 
@@ -41,13 +39,14 @@ class DustEngineImpl @javax.inject.Inject() (
 
   //override def applicationLifecycle = applicationLifecycle1
 
-  lazy val dustModule = {
-    val module = NodeJSModule.create(asyncContents)(dustExecutionWrap.singleThread)(ec)
+  override lazy val dustModule: NodeJSModule = {
+    val module = NodeJSModule.create(asyncContents.contentMap.keys.toList)(dustExecutionWrap.singleThread)(ec)
     applicationLifecycle.addStopHook { () =>
       Future.successful(module.close)
     }
     module
   }
+
   override def renderString = {
     if (templateConfigure.isNodeProd) {
       lazytRenderString
@@ -59,25 +58,6 @@ class DustEngineImpl @javax.inject.Inject() (
   private lazy val lazytRenderString = {
     defRenderString
   }
-  /*def addPropertyTemplateString(v8: V8) = {
-
-  }*/
-  /*lazy val addTemplateAction = dustModule.moduleF.flatMap { module =>
-    dustModule.execV8Job {
-      val propertyTemplateString = Files.readAllLines(dustModule.temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
-      val tempStr1 = propertyTemplateString
-      module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
-      tempStr1
-    }
-  }*/
-
-  /*lazy val addPropertyTemplateStringAction: Future[String] = dustModule.v8F.flatMap { v8 =>
-    dustModule.execV8Job {
-      val propertyTemplateString = Files.readAllLines(dustModule.temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
-      v8.add("propertyTemplateString", propertyTemplateString)
-      propertyTemplateString
-    }
-  }*/
 
   def releaseJSObject(v8Obj: V8Object): Future[Boolean] = {
     dustModule.execV8Job {
@@ -111,7 +91,7 @@ class DustEngineImpl @javax.inject.Inject() (
       }
     }
 
-    override def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, /*contents: AsyncContentCols, serverDataContent: AsyncContent,*/ isDebug: Boolean) = {
+    override def render(content: String, context: V8Object): Future[String] = {
       (for {
         nodeJS <- dustModule.nodeJSF
         v8 <- dustModule.v8F
@@ -120,126 +100,12 @@ class DustEngineImpl @javax.inject.Inject() (
         //_ <- addTemplateAction
       } yield {
 
-        var execQuery: V8Function = null
-        var v8Query: V8Object = null
-        var v8Request: V8Object = null
         var successCallback: V8Function = null
         var failureCallback: V8Function = null
         var v8Promise: V8Object = null
         //var remoteJsonQuery: V8Function = null
 
         dustModule.execV8Job {
-          v8Query = new V8Object(v8)
-          val queryMap: Map[String, AsyncContent] = asyncContents.contentMap //.map { case (key, cntentApply) => key -> cntentApply }
-
-          execQuery = new V8Function(v8, new JavaCallback {
-            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-              val key = parameters.getString(0)
-              val param = parameters.getString(1)
-              val callback = parameters.getObject(2).asInstanceOf[V8Function]
-              val callBackParams = new V8Array(v8)
-              queryMap.get(key) match {
-                case Some(query) =>
-                  (query.exec(io.circe.parser.parse(param).right.get, request).flatMap { s =>
-                    dustModule.execV8Job {
-                      s match {
-                        case Left(e) =>
-                          callBackParams.pushNull()
-                          callBackParams.push(e.getMessage)
-                          callback.call(null, callBackParams)
-                        case Right(data) =>
-                          callBackParams.push(data.noSpaces)
-                          callBackParams.pushNull()
-                          callback.call(null, callBackParams)
-                      }
-                      true
-                    }
-                  }.andThen {
-                    case s =>
-                      (for {
-                        _ <- releaseJSObject(callback)
-                        _ <- releaseJSObject(callBackParams)
-                      } yield {
-                        true
-                      }).map { _: Boolean =>
-                        s match {
-                          case Failure(e) =>
-                            logger.error("执行 exec query 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
-                          case _ =>
-                        }
-                      }
-                  }): Future[Boolean]
-                case _ =>
-                  for {
-                    _ <- releaseJSObject(callback)
-                    _ <- releaseJSObject(callBackParams)
-                  } yield {
-                    true
-                  }
-                  throw new Exception(s"找不到键：${key}对应的查询方案")
-              }
-              null
-            }
-
-          })
-
-          /*remoteJsonQuery = new V8Function(v8, new JavaCallback {
-            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-              val serverData = parameters.getString(0)
-              val callback = parameters.get(1).asInstanceOf[V8Function]
-              val callBackParams = new V8Array(v8)
-              (serverDataContent.exec(serverData, request).map { s =>
-                s match {
-                  case Left(e) =>
-                    callBackParams.pushNull()
-                    callBackParams.push(e.getMessage)
-                    callback.call(null, callBackParams)
-                  case Right(data) =>
-                    callBackParams.push(data)
-                    callBackParams.pushNull()
-                    callback.call(null, callBackParams)
-                }
-                true
-              }(dustExecution).andThen {
-                case s =>
-                  (for {
-                    _ <- releaseJSObject(callback)
-                    _ <- releaseJSObject(callBackParams)
-                  } yield {
-                    true
-                  }).map { _: Boolean =>
-                    s match {
-                      case Failure(e) =>
-                        logger.error("执行 Remote Json 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
-                      case _ =>
-                    }
-                  }
-              }): Future[Boolean]
-              null
-            }
-          })*/
-
-          v8Request = new V8Object(v8)
-
-          parseResult.infos.foreach {
-            case InfoWrap(url, path, typeRef) =>
-              typeRef match {
-                case "String" => v8Request.add(path, url)
-                case "Boolean" => v8Request.add(path, java.lang.Boolean.valueOf(url))
-                case "Int" => v8Request.add(path, Integer.valueOf(url))
-                case "Double" => v8Request.add(path, java.lang.Double.valueOf(url))
-                case _ => throw new Exception("不可识别的参数类型")
-              }
-          }
-
-          request.queryString.foreach {
-            case (key, values) =>
-              v8Request.add(key, values(0))
-          }
-
-          v8Query.add("query", execQuery)
-          v8Query.add("request", v8Request)
-          //v8Query.add("remoteJson", remoteJsonQuery)
 
           val promise = Promise[String]
           val resultFuture = promise.future
@@ -277,7 +143,7 @@ class DustEngineImpl @javax.inject.Inject() (
 
           v8Promise.add("failure", failureCallback)
 
-          module.executeJSFunction("outPut", content, param, isDebug: java.lang.Boolean, v8Query, v8Promise)
+          module.executeJSFunction("outPut", content, context, v8Promise)
           resultFuture
         }.flatten
           .andThen {
@@ -286,10 +152,6 @@ class DustEngineImpl @javax.inject.Inject() (
                 nodeJS.handleMessage()
               }.flatMap { _ =>
                 for {
-                  _ <- releaseJSObject(execQuery)
-                  //_ <- releaseJSObject(heperNames)
-                  _ <- releaseJSObject(v8Query)
-                  _ <- releaseJSObject(v8Request)
                   _ <- releaseJSObject(successCallback)
                   _ <- releaseJSObject(failureCallback)
                   _ <- releaseJSObject(v8Promise)
@@ -302,13 +164,6 @@ class DustEngineImpl @javax.inject.Inject() (
           }
       })
         .flatten
-        .recoverWith {
-          case e: Exception =>
-            logger.error("渲染 dust 模板发生不可预料的错误", e)
-            val newE = new Exception(s"渲染 dust 模板发生不可预料的错误,错误信息\n:${e.getMessage}")
-            newE.initCause(e)
-            Future.failed(newE)
-        }
     }
   }
 

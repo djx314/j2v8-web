@@ -1,21 +1,17 @@
 package org.xarcher.nodeWeb
 
 import com.eclipsesource.v8._
-import java.nio.charset.Charset
-import java.nio.file.Files
 import javax.inject.Singleton
 
 import org.slf4j.LoggerFactory
-import org.xarcher.urlParser.{ InfoWrap, ParseResult }
-import play.api.mvc.{ AnyContent, Request }
-import play.api.inject.ApplicationLifecycle
+import org.xarcher.urlParser.{InfoWrap, ParseResult}
+import play.api.mvc.{AnyContent, Request}
 
-import scala.collection.JavaConverters._
-import scala.concurrent.{ ExecutionContext, Future, Promise }
-import scala.util.{ Failure, Try }
+import scala.concurrent.{ExecutionContext, Future}
+import scala.util.{Failure, Try}
 
 trait PlayGen {
-  def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean): Future[String]
+  def render(content: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean): Future[String]
   def addTemplate(templateName: String, content: String): Future[Boolean]
 }
 
@@ -27,27 +23,14 @@ trait PlayEngine {
 
 @Singleton
 class PlayEngineImpl @javax.inject.Inject() (
-    applicationLifecycle: ApplicationLifecycle,
-    templateConfigure: TemplateConfigure,
-    asyncContents: AsyncContentCols,
-    dustExecutionWrap: DustExecution
+  dustEngine: DustEngine,
+  asyncContents: AsyncContentCols,
 )(implicit ec: ExecutionContext) extends PlayEngine {
 
-  val logger = LoggerFactory.getLogger(classOf[DustEngine])
+  val logger = LoggerFactory.getLogger(classOf[PlayEngine])
 
-  lazy val dustModule = {
-    val module = NodeJSModule.create(asyncContents)(dustExecutionWrap.singleThread)(ec)
-    applicationLifecycle.addStopHook { () =>
-      Future.successful(module.close)
-    }
-    module
-  }
   override def renderString = {
-    if (templateConfigure.isNodeProd) {
-      lazytRenderString
-    } else {
-      defRenderString
-    }
+    lazytRenderString
   }
 
   private lazy val lazytRenderString = {
@@ -55,7 +38,7 @@ class PlayEngineImpl @javax.inject.Inject() (
   }
 
   def releaseJSObject(v8Obj: V8Object): Future[Boolean] = {
-    dustModule.execV8Job {
+    dustEngine.dustModule.execV8Job {
       if (v8Obj ne null) {
         v8Obj.release()
         true
@@ -73,38 +56,23 @@ class PlayEngineImpl @javax.inject.Inject() (
   private def defRenderString: PlayGen = new PlayGen {
 
     override def addTemplate(templateName: String, content: String): Future[Boolean] = {
-      dustModule.moduleF.flatMap { module =>
-        dustModule.execV8Job {
-          module.executeJSFunction("addTemplate", templateName, content)
-          logger.info(s"添加了名为:$templateName 的模板")
-          true
-        }
-      }.recover {
-        case e: Exception =>
-          logger.info("添加模板发生错误", e)
-          false
-      }
+      dustEngine.renderString.addTemplate(templateName, content)
     }
 
-    override def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, /*contents: AsyncContentCols, serverDataContent: AsyncContent,*/ isDebug: Boolean) = {
+    override def render(content: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean) = {
       (for {
-        nodeJS <- dustModule.nodeJSF
-        v8 <- dustModule.v8F
-        //_ <- addPropertyTemplateStringAction
-        module <- dustModule.moduleF
-        //_ <- addTemplateAction
+        nodeJS <- dustEngine.dustModule.nodeJSF
+        v8 <- dustEngine.dustModule.v8F
       } yield {
 
         var execQuery: V8Function = null
-        var v8Query: V8Object = null
+        var v8Context: V8Object = null
         var v8Request: V8Object = null
-        var successCallback: V8Function = null
-        var failureCallback: V8Function = null
-        var v8Promise: V8Object = null
-        //var remoteJsonQuery: V8Function = null
 
-        dustModule.execV8Job {
-          v8Query = new V8Object(v8)
+        dustEngine.dustModule.execV8Job {
+          v8Context = new V8Object(v8)
+
+
           val queryMap: Map[String, AsyncContent] = asyncContents.contentMap //.map { case (key, cntentApply) => key -> cntentApply }
 
           execQuery = new V8Function(v8, new JavaCallback {
@@ -116,7 +84,7 @@ class PlayEngineImpl @javax.inject.Inject() (
               queryMap.get(key) match {
                 case Some(query) =>
                   (query.exec(io.circe.parser.parse(param).right.get, request).flatMap { s =>
-                    dustModule.execV8Job {
+                    dustEngine.dustModule.execV8Job {
                       s match {
                         case Left(e) =>
                           callBackParams.pushNull()
@@ -158,41 +126,7 @@ class PlayEngineImpl @javax.inject.Inject() (
 
           })
 
-          /*remoteJsonQuery = new V8Function(v8, new JavaCallback {
-            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-              val serverData = parameters.getString(0)
-              val callback = parameters.get(1).asInstanceOf[V8Function]
-              val callBackParams = new V8Array(v8)
-              (serverDataContent.exec(serverData, request).map { s =>
-                s match {
-                  case Left(e) =>
-                    callBackParams.pushNull()
-                    callBackParams.push(e.getMessage)
-                    callback.call(null, callBackParams)
-                  case Right(data) =>
-                    callBackParams.push(data)
-                    callBackParams.pushNull()
-                    callback.call(null, callBackParams)
-                }
-                true
-              }(dustExecution).andThen {
-                case s =>
-                  (for {
-                    _ <- releaseJSObject(callback)
-                    _ <- releaseJSObject(callBackParams)
-                  } yield {
-                    true
-                  }).map { _: Boolean =>
-                    s match {
-                      case Failure(e) =>
-                        logger.error("执行 Remote Json 操作发生未知异常(由于上一层函数已经对外屏蔽错误,所以此错误为不可处理的异常)", e)
-                      case _ =>
-                    }
-                  }
-              }): Future[Boolean]
-              null
-            }
-          })*/
+          v8Context.add("scala-query", execQuery)
 
           v8Request = new V8Object(v8)
 
@@ -212,68 +146,22 @@ class PlayEngineImpl @javax.inject.Inject() (
               v8Request.add(key, values(0))
           }
 
-          v8Query.add("query", execQuery)
-          v8Query.add("request", v8Request)
-          //v8Query.add("remoteJson", remoteJsonQuery)
+          v8Context.add("request", v8Request)
+          v8Context.add("isDebug", isDebug)
 
-          val promise = Promise[String]
-          val resultFuture = promise.future
-          v8Promise = new V8Object(v8)
-
-          successCallback = new V8Function(v8, new JavaCallback() {
-            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-              try {
-                promise.success(parameters.getString(0))
-                null
-              } catch {
-                case e: Exception =>
-                  logger.error("须处理的 j2v8 运行时错误", e)
-                  promise.failure(e)
-                  null
-              }
-            }
-          })
-
-          failureCallback = new V8Function(v8, new JavaCallback() {
-            override def invoke(receiver: V8Object, parameters: V8Array): Object = {
-              try {
-                promise.failure(new Exception(parameters.getString(0)))
-                null
-              } catch {
-                case e: Exception =>
-                  logger.error("须处理的 j2v8 运行时错误", e)
-                  promise.failure(e)
-                  null
-              }
-            }
-          })
-
-          v8Promise.add("success", successCallback)
-
-          v8Promise.add("failure", failureCallback)
-
-          module.executeJSFunction("outPut", content, param, isDebug: java.lang.Boolean, v8Query, v8Promise)
-          resultFuture
+          dustEngine.renderString.render(content, v8Context)
         }.flatten
           .andThen {
             case _: Try[String] =>
-              (dustModule.execV8Job {
-                nodeJS.handleMessage()
-              }.flatMap { _ =>
-                for {
-                  _ <- releaseJSObject(execQuery)
-                  //_ <- releaseJSObject(heperNames)
-                  _ <- releaseJSObject(v8Query)
-                  _ <- releaseJSObject(v8Request)
-                  _ <- releaseJSObject(successCallback)
-                  _ <- releaseJSObject(failureCallback)
-                  _ <- releaseJSObject(v8Promise)
-                } yield true
-              }.recover {
+              (for {
+                _ <- releaseJSObject(execQuery)
+                _ <- releaseJSObject(v8Request)
+                _ <- releaseJSObject(v8Context)
+              } yield true).recover {
                 case e: Exception =>
                   e.printStackTrace
                   false
-              }): Future[Boolean]
+              }: Future[Boolean]
           }
       })
         .flatten

@@ -135,12 +135,10 @@ for (var i = 0; i < helperNames.length; i++) {
     var helperName1 = helperNames[i];
     (function(helperName) {
         dust.helpers[helperName] = function(chunk, context, bodies, params) {
-            //var key = context.resolve(params.key);
-            //delete params.key;
             var query = context.get("scala-query");
 
             return chunk.map(function(inChunk) {
-                query.query(helperName, JSON.stringify(params), function(result, errStr) {
+                query(helperName, JSON.stringify(params), function(result, errStr) {
                     if (typeof errStr === "string") {
                         inChunk.end("渲染发生错误,错误信息:" + errStr);
                     } else if ((typeof result === "object") || (typeof result === "string") || typeof result === "number") {
@@ -177,16 +175,14 @@ dust.helpers.property = function yell(chunk, context, bodies, params) {
     });
 };
 
-var outPut = function(inPut, param, isDebug, query, promise) {
-
-    var requestParam = JSON.parse(param);
+var outPut = function(inPut, context, promise) {
+    /*var requestParam = JSON.parse(param);
 
     requestParam["scala-isDebug"] = isDebug;
     requestParam["scala-query"] = query;
 
-    requestParam["scala-request"] = query.request;
-
-    dust.renderSource(inPut, requestParam, function(error, result) {
+    requestParam["scala-request"] = query.request;*/
+    dust.renderSource(inPut, context, function(error, result) {
         if (error) {
             promise.failure(error.message);
         } else {

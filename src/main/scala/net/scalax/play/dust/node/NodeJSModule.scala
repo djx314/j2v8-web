@@ -26,7 +26,7 @@ trait NodeJSModule extends AutoCloseable {
     tempJSRoot.resolve(dirName)
   }
 
-  val asyncContentCols: AsyncContentCols
+  val helperKeys: List[String]
 
   lazy val helperNamesF: Future[V8Array] = {
     mixRunTime.map(_._4)
@@ -45,7 +45,7 @@ trait NodeJSModule extends AutoCloseable {
         val v8 = nodeJS.getRuntime
 
         val helperNames = new V8Array(v8)
-        asyncContentCols.contentMap.keys.foreach(s => helperNames.push(s))
+        helperKeys.foreach(s => helperNames.push(s))
         v8.add("helperNames", helperNames)
 
         val module = nodeJS.require(temDir.resolve("play-dust-bridge.js").toFile)
@@ -156,13 +156,13 @@ trait NodeJSModule extends AutoCloseable {
 
 object NodeJSModule {
 
-  def create(asyncContentCols: AsyncContentCols)(dustExecution: ExecutionContext)(defaultExecutionContext: ExecutionContext): NodeJSModule = {
-    val asyncContentCols1 = asyncContentCols
+  def create(helperKeys: List[String])(dustExecution: ExecutionContext)(defaultExecutionContext: ExecutionContext): NodeJSModule = {
+    val helperKeys1 = helperKeys
     val dustExecution1 = dustExecution
     val defaultExecutionContext1 = defaultExecutionContext
     val module = new NodeJSModule {
       override protected val dustExecution = dustExecution1
-      override val asyncContentCols = asyncContentCols1
+      override val helperKeys = helperKeys1
       override val defaultExecutionContext = defaultExecutionContext1
     }
     module.moduleF

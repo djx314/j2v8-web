@@ -15,5 +15,8 @@ class Module extends AbstractModule {
     bind(classOf[DustEngine])
       .to(classOf[DustEngineImpl])
 
+    bind(classOf[PlayEngine])
+      .to(classOf[PlayEngineImpl])
+
   }
 }
