@@ -13,6 +13,6 @@ trait TemplateConfigure {
 class TemplateConfigureImpl @javax.inject.Inject() (
     configure: Configuration
 ) extends TemplateConfigure {
-  //override val isNodeProd = configure.getAndValidate[String]("djx.node.init.type", Set("prod", "dev")) == "prod"
-  override val isTemplateSync = configure.getOptional[Boolean]("djx.dust.template.sync").getOrElse(false)
+  //override val isNodeProd = configure.getAndValidate[String]("play.dust.node.init.type", Set("prod", "dev")) == "prod"
+  override val isTemplateSync = configure.getOptional[Boolean]("play.dust.template.sync").getOrElse(false)
 }

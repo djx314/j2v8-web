@@ -1,6 +1,8 @@
 package org.xarcher.nodeWeb
 
 import com.eclipsesource.v8._
+import java.nio.charset.Charset
+import java.nio.file.Files
 import javax.inject.Singleton
 
 import org.slf4j.LoggerFactory
@@ -12,34 +14,26 @@ import scala.collection.JavaConverters._
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.util.{ Failure, Try }
 
-trait AsyncContentCols {
-  val contentMap: Map[String, AsyncContent]
-}
-
-trait DustGen {
-
+trait PlayGen {
   def render(content: String, param: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean): Future[String]
   def addTemplate(templateName: String, content: String): Future[Boolean]
-
 }
 
-trait DustEngine {
+trait PlayEngine {
 
-  def renderString: DustGen
+  def renderString: PlayGen
 
 }
 
 @Singleton
-class DustEngineImpl @javax.inject.Inject() (
+class PlayEngineImpl @javax.inject.Inject() (
     applicationLifecycle: ApplicationLifecycle,
     templateConfigure: TemplateConfigure,
     asyncContents: AsyncContentCols,
     dustExecutionWrap: DustExecution
-)(implicit ec: ExecutionContext) extends DustEngine {
+)(implicit ec: ExecutionContext) extends PlayEngine {
 
   val logger = LoggerFactory.getLogger(classOf[DustEngine])
-
-  //override def applicationLifecycle = applicationLifecycle1
 
   lazy val dustModule = {
     val module = NodeJSModule.create(asyncContents)(dustExecutionWrap.singleThread)(ec)
@@ -59,25 +53,6 @@ class DustEngineImpl @javax.inject.Inject() (
   private lazy val lazytRenderString = {
     defRenderString
   }
-  /*def addPropertyTemplateString(v8: V8) = {
-
-  }*/
-  /*lazy val addTemplateAction = dustModule.moduleF.flatMap { module =>
-    dustModule.execV8Job {
-      val propertyTemplateString = Files.readAllLines(dustModule.temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
-      val tempStr1 = propertyTemplateString
-      module.executeJSFunction("addTemplate", "dbQuery", tempStr1)
-      tempStr1
-    }
-  }*/
-
-  /*lazy val addPropertyTemplateStringAction: Future[String] = dustModule.v8F.flatMap { v8 =>
-    dustModule.execV8Job {
-      val propertyTemplateString = Files.readAllLines(dustModule.temDir.resolve("propertyTemp.html"), Charset.forName("utf-8")).asScala.toList.mkString("\n")
-      v8.add("propertyTemplateString", propertyTemplateString)
-      propertyTemplateString
-    }
-  }*/
 
   def releaseJSObject(v8Obj: V8Object): Future[Boolean] = {
     dustModule.execV8Job {
@@ -95,7 +70,7 @@ class DustEngineImpl @javax.inject.Inject() (
     }
   }
 
-  private def defRenderString: DustGen = new DustGen {
+  private def defRenderString: PlayGen = new PlayGen {
 
     override def addTemplate(templateName: String, content: String): Future[Boolean] = {
       dustModule.moduleF.flatMap { module =>
