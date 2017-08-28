@@ -141,9 +141,18 @@ for (var i = 0; i < helperNames.length; i++) {
                 query(helperName, JSON.stringify(params), function(result, errStr) {
                     if (typeof errStr === "string") {
                         inChunk.end("渲染发生错误,错误信息:" + errStr);
-                    } else if ((typeof result === "object") || (typeof result === "string") || typeof result === "number") {
-                        var data = JSON.parse(result);
-                        inChunk.render(bodies.block, context.push({ content: data })).end();
+                    //} else if ((typeof result === "object") || (typeof result === "string") || typeof result === "number") {
+                    } else if (typeof result === "object") {
+                        if ((typeof result._originalValue === "string")) {
+                            inChunk.end(result._originalValue);
+                        } else if (typeof result._originalJson === "string") {
+                            var data = JSON.parse(result._originalJson);
+                            inChunk.render(bodies.block, context.push({ content: data })).end();
+                        } else if (typeof result._originalObject === "object") {
+
+                        } else {
+                            inChunk.end("渲染错误,不可识别的数据类型");
+                        }
                     } else {
                         inChunk.end("渲染错误,错误信息和数据皆不合法");
                     }

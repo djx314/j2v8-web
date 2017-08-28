@@ -1,13 +1,98 @@
 package org.xarcher.nodeWeb
 
+import com.eclipsesource.v8.{ V8, V8Object }
 import io.circe.Json
+import org.slf4j.LoggerFactory
 import play.api.mvc.{ AnyContent, Request }
 
-import scala.concurrent.Future
+import scala.concurrent.{ ExecutionContext, Future }
+
+trait AsyncResult extends AutoCloseable {
+  val result: Either[Exception, V8Object]
+  override def close: Unit
+}
 
 trait AsyncContent {
 
-  def exec(content: Json, request: Request[AnyContent]): Future[Either[Exception, Json]]
+  val logger = LoggerFactory.getLogger(classOf[AsyncContent])
+
+  def exec(content: Json, request: Request[AnyContent], v8Executor: V8Executor, v8: V8)(implicit ec: ExecutionContext): Future[AsyncResult]
+
+  protected def releaseJSObject(v8Obj: V8Object, v8Executor: V8Executor)(implicit ec: ExecutionContext): Future[Boolean] = {
+    v8Executor.exec {
+      if (v8Obj ne null) {
+        v8Obj.release()
+        true
+      } else {
+        logger.warn("对象未正确创建，取消回收")
+        true
+      }
+    }.recover {
+      case e: Exception =>
+        logger.warn("回收 js 对象出现错误", e)
+        false
+    }
+  }
+
+}
+
+trait JsonContent extends AsyncContent {
+
+  def execJson(content: Json, request: Request[AnyContent]): Future[Either[Exception, Json]]
+
+  override def exec(content: Json, request: Request[AnyContent], v8Executor: V8Executor, v8: V8)(implicit ec: ExecutionContext): Future[AsyncResult] = {
+    execJson(content, request).flatMap {
+      case Left(e) =>
+        Future.successful {
+          new AsyncResult {
+            override val result = Left(e)
+            override def close: Unit = ()
+          }
+        }
+      case Right(result) =>
+        var v8Object: V8Object = null
+        def closeJob = releaseJSObject(v8Object, v8Executor)
+
+        v8Executor.exec {
+          v8Object = new V8Object(v8)
+          v8Object.add("_originalJson", result.noSpaces)
+          new AsyncResult {
+            override val result = Right(v8Object)
+            override def close: Unit = closeJob
+          }
+        }
+    }
+  }
+
+}
+
+trait StringContent extends AsyncContent {
+
+  def execString(content: Json, request: Request[AnyContent]): Future[Either[Exception, String]]
+
+  override def exec(content: Json, request: Request[AnyContent], v8Executor: V8Executor, v8: V8)(implicit ec: ExecutionContext): Future[AsyncResult] = {
+    execString(content, request).flatMap {
+      case Left(e) =>
+        Future.successful {
+          new AsyncResult {
+            override val result = Left(e)
+            override def close: Unit = ()
+          }
+        }
+      case Right(result) =>
+        var v8Object: V8Object = null
+        def closeJob = releaseJSObject(v8Object, v8Executor)
+
+        v8Executor.exec {
+          v8Object = new V8Object(v8)
+          v8Object.add("_originalValue", result)
+          new AsyncResult {
+            override val result = Right(v8Object)
+            override def close: Unit = closeJob
+          }
+        }
+    }
+  }
 
 }
 //case class AsyncParam[T](param: T, slickParam: String, isDebug: Boolean)

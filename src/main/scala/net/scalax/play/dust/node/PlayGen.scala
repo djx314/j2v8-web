@@ -60,8 +60,13 @@ class PlayEngineImpl @javax.inject.Inject() (
     }
 
     override def render(content: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean) = {
+      val executor = new V8Executor {
+        override def exec[T](body: => T): Future[T] = {
+          dustEngine.dustModule.execV8Job(body)
+        }
+      }
+
       (for {
-        nodeJS <- dustEngine.dustModule.nodeJSF
         v8 <- dustEngine.dustModule.v8F
       } yield {
 
@@ -83,19 +88,22 @@ class PlayEngineImpl @javax.inject.Inject() (
               val callBackParams = new V8Array(v8)
               queryMap.get(key) match {
                 case Some(query) =>
-                  (query.exec(io.circe.parser.parse(param).right.get, request).flatMap { s =>
+                  (query.exec(io.circe.parser.parse(param).right.get, request, executor, v8).flatMap { s =>
                     dustEngine.dustModule.execV8Job {
-                      s match {
+                      s.result match {
                         case Left(e) =>
                           callBackParams.pushNull()
                           callBackParams.push(e.getMessage)
                           callback.call(null, callBackParams)
                         case Right(data) =>
-                          callBackParams.push(data.noSpaces)
+                          callBackParams.push(data)
                           callBackParams.pushNull()
                           callback.call(null, callBackParams)
                       }
                       true
+                    }.andThen {
+                      case _ =>
+                        s.close
                     }
                   }.andThen {
                     case s =>
