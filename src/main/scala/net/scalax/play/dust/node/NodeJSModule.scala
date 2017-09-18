@@ -48,7 +48,9 @@ trait NodeJSModule extends AutoCloseable {
         helperKeys.foreach(s => helperNames.push(s))
         v8.add("helperNames", helperNames)
 
-        val module = nodeJS.require(temDir.resolve("play-dust-bridge.js").toFile)
+        val bootFile = temDir.resolve("play-dust-bridge.js").toFile
+        logger.info(s"加载初始文件，文件路径：\n${bootFile.getCanonicalPath}")
+        val module = nodeJS.require(bootFile)
         (nodeJS, v8, module, helperNames)
       }
     }
