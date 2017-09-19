@@ -32,7 +32,7 @@ val playV = "2.6.5"
 
 //libraryDependencies += "commons-io" % "commons-io" % "2.5"
 
-libraryDependencies += "com.typesafe.play" %% "play-guice" % playV
+//libraryDependencies += "com.typesafe.play" %% "play-guice" % playV
 //lazy val playVersion = play.core.PlayVersion.current
 libraryDependencies += "com.typesafe.play" %% "play" % playV
 //lazy val ubwProject = RootProject(file("../ubw"))

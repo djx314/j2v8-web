@@ -1,6 +1,5 @@
 package org.xarcher.nodeWeb.modules
-
-import com.google.inject.AbstractModule
+/*import com.google.inject.AbstractModule
 import org.xarcher.nodeWeb._
 
 class Module extends AbstractModule {
@@ -19,4 +18,4 @@ class Module extends AbstractModule {
       .to(classOf[PlayEngineImpl])
 
   }
-}
+}*/ 
