@@ -10,8 +10,7 @@ import scala.concurrent.{ ExecutionContext, ExecutionContextExecutorService }
 
 @Singleton
 class DustExecutionImpl @Inject() (
-    applicationLifecycle: ApplicationLifecycle
-) extends DustExecution {
+  applicationLifecycle: ApplicationLifecycle) extends DustExecution {
 
   val logger = LoggerFactory.getLogger(classOf[DustExecution])
 

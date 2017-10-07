@@ -1,4 +1,4 @@
-package org.xarcher.nodeWeb.modules
+//package org.xarcher.nodeWeb.modules
 /*import com.google.inject.AbstractModule
 import org.xarcher.nodeWeb._
 

@@ -29,11 +29,10 @@ trait DustEngine {
 
 @Singleton
 class DustEngineImpl @javax.inject.Inject() (
-    applicationLifecycle: ApplicationLifecycle,
-    templateConfigure: TemplateConfigure,
-    asyncContents: AsyncContentCols,
-    dustExecutionWrap: DustExecution
-)(implicit ec: ExecutionContext) extends DustEngine {
+  applicationLifecycle: ApplicationLifecycle,
+  templateConfigure: TemplateConfigure,
+  asyncContents: AsyncContentCols,
+  dustExecutionWrap: DustExecution)(implicit ec: ExecutionContext) extends DustEngine {
 
   val logger = LoggerFactory.getLogger(classOf[DustEngine])
 

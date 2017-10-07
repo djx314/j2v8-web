@@ -54,8 +54,7 @@ object CopyHelper {
         override def postVisitDirectory(dir: Path, exc: IOException): FileVisitResult = {
           super.postVisitDirectory(dir, exc)
         }
-      }
-    )
+      })
   }
 
   def copyInputStreamToFile(input: InputStream, path: Path): Long = {

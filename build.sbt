@@ -1,3 +1,5 @@
+resolvers += "Bintary JCenter" at "http://jcenter.bintray.com"
+
 libraryDependencies += "org.parboiled" %% "parboiled" % "2.1.4"
 
 libraryDependencies += "org.scalatest" %% "scalatest" % "3.0.0" % "test"
@@ -28,7 +30,7 @@ libraryDependencies ++= Seq(
   "io.circe" %% "circe-parser"
 ).map(_ % circeVersion)
 
-val playV = "2.6.5"
+val playV = "2.6.6"
 
 //libraryDependencies += "commons-io" % "commons-io" % "2.5"
 

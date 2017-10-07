@@ -10,11 +10,11 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.language.implicitConversions
 
 class UrlParserTest extends FlatSpec
-    with Matchers
-    with EitherValues
-    with ScalaFutures
-    with BeforeAndAfterAll
-    with BeforeAndAfter {
+  with Matchers
+  with EitherValues
+  with ScalaFutures
+  with BeforeAndAfterAll
+  with BeforeAndAfter {
 
   val t = 10.seconds
   override implicit val patienceConfig = PatienceConfig(timeout = t)
@@ -57,8 +57,7 @@ class UrlParserTest extends FlatSpec
       Right(ParseResult(
         List(InfoWrap("ewabc", "abc", "String"), InfoWrap("wer", "name", "String")),
         List(Capture("acceff", "String"), Capture("bcce", "Int")),
-        List.empty
-      ))
+        List.empty))
   }
 
 }

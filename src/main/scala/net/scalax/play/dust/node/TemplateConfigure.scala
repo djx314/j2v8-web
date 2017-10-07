@@ -11,8 +11,7 @@ trait TemplateConfigure {
 
 @Singleton
 class TemplateConfigureImpl @javax.inject.Inject() (
-    configure: Configuration
-) extends TemplateConfigure {
+  configure: Configuration) extends TemplateConfigure {
   //override val isNodeProd = configure.getAndValidate[String]("play.dust.node.init.type", Set("prod", "dev")) == "prod"
   override val isTemplateSync = configure.getOptional[Boolean]("play.dust.template.sync").getOrElse(false)
 }
