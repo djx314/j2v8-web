@@ -66,6 +66,9 @@ dust.helpers.property = function yell(chunk, context, bodies, params) {
 };
 
 var outPut = function(inPut, context, promise) {
+    if (typeof context.param === "string") {
+        context.param = JSON.parse(context.param);
+    }
     dust.renderSource(inPut, context, function(error, result) {
         if (error) {
             promise.failure(error.message);

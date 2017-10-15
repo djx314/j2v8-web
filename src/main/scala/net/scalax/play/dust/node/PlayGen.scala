@@ -3,6 +3,7 @@ package org.xarcher.nodeWeb
 import com.eclipsesource.v8._
 import javax.inject.Singleton
 
+import io.circe.Json
 import org.slf4j.LoggerFactory
 import org.xarcher.urlParser.{InfoWrap, ParseResult}
 import play.api.mvc.{AnyContent, Request}
@@ -11,7 +12,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Try}
 
 trait PlayGen {
-  def render(content: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean): Future[String]
+  def render(content: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean, contextParam: Json = Json.Null): Future[String]
   def addTemplate(templateName: String, content: String): Future[Boolean]
 }
 
@@ -59,7 +60,7 @@ class PlayEngineImpl @javax.inject.Inject() (
       dustEngine.renderString.addTemplate(templateName, content)
     }
 
-    override def render(content: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean) = {
+    override def render(content: String, request: Request[AnyContent], parseResult: ParseResult, isDebug: Boolean, contextParam: Json): Future[String] = {
       val executor = new V8Executor {
         override def exec[T](body: => T): Future[T] = {
           dustEngine.dustModule.execV8Job(body)
@@ -156,6 +157,7 @@ class PlayEngineImpl @javax.inject.Inject() (
 
           v8Context.add("request", v8Request)
           v8Context.add("isDebug", isDebug)
+          v8Context.add("param", contextParam.noSpaces)
 
           dustEngine.renderString.render(content, v8Context)
         }.flatten
