@@ -38,7 +38,7 @@ val playV = "2.6.6"
 //lazy val playVersion = play.core.PlayVersion.current
 libraryDependencies += "com.typesafe.play" %% "play" % playV
 //lazy val ubwProject = RootProject(file("../ubw"))
-scalaVersion := "2.12.3"
+scalaVersion := "2.12.4"
 //dependsOn(ubwProject)
 scalacOptions ++= Seq("-Ywarn-unused-import", "-deprecation")
 
