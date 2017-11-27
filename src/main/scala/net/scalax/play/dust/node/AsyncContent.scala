@@ -7,9 +7,9 @@ import play.api.mvc.{ AnyContent, Request }
 
 import scala.concurrent.{ ExecutionContext, Future }
 
-trait AsyncResult extends AutoCloseable {
+trait AsyncResult {
   val result: Either[Exception, V8Object]
-  override def close: Unit
+  def close: Future[Boolean]
 }
 
 trait AsyncContent {
@@ -46,7 +46,7 @@ trait JsonContent extends AsyncContent {
         Future.successful {
           new AsyncResult {
             override val result = Left(e)
-            override def close: Unit = ()
+            override def close: Future[Boolean] = Future.successful(true)
           }
         }
       case Right(result) =>
@@ -58,7 +58,7 @@ trait JsonContent extends AsyncContent {
           v8Object.add("_originalJson", result.noSpaces)
           new AsyncResult {
             override val result = Right(v8Object)
-            override def close: Unit = closeJob
+            override def close: Future[Boolean] = closeJob
           }
         }
     }
@@ -76,7 +76,7 @@ trait StringContent extends AsyncContent {
         Future.successful {
           new AsyncResult {
             override val result = Left(e)
-            override def close: Unit = ()
+            override def close: Future[Boolean] = Future.successful(true)
           }
         }
       case Right(result) =>
@@ -88,7 +88,7 @@ trait StringContent extends AsyncContent {
           v8Object.add("_originalValue", result)
           new AsyncResult {
             override val result = Right(v8Object)
-            override def close: Unit = closeJob
+            override def close: Future[Boolean] = closeJob
           }
         }
     }

@@ -7,10 +7,10 @@ import java.util.UUID
 import org.slf4j.LoggerFactory
 import org.xarcher.nodeWeb.modules.CopyHelper
 
-import scala.concurrent.{ Await, ExecutionContext, Future }
+import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Properties, Success }
 
-trait NodeJSModule extends AutoCloseable {
+trait NodeJSModule {
 
   protected val dustExecution: ExecutionContext
   implicit val defaultExecutionContext: ExecutionContext
@@ -134,24 +134,24 @@ trait NodeJSModule extends AutoCloseable {
       logger.info("v8 全局对象未正确初始化，跳过回收")
   }
 
-  override def close: Unit = {
+  def close: Future[Boolean] = {
     logger.info("开始回收 node 资源")
 
-    val closeAction: Future[Unit] = (for {
+    val closeAction: Future[Boolean] = (for {
       (_: Unit) <- releaseHeplerNames
       (_: Unit) <- releaseModule
       (_: Unit) <- releaseNodeJS
       (_: Unit) <- releaseV8
     } yield {
-      ()
+      true
     }).andThen {
-      case Success(_: Unit) =>
+      case Success(_: Boolean) =>
         logger.info("j2v8 资源回收完毕")
       case Failure(e) =>
         logger.error("j2v8 资源回收出现未能处理的异常", e)
     }
 
-    Await.result(closeAction, scala.concurrent.duration.Duration.Inf): Unit
+    closeAction
   }
 
 }

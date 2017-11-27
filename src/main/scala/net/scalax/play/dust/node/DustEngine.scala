@@ -41,7 +41,7 @@ class DustEngineImpl @javax.inject.Inject() (
   override lazy val dustModule: NodeJSModule = {
     val module = NodeJSModule.create(asyncContents.contentMap.keys.toList)(dustExecutionWrap.singleThread)(ec)
     applicationLifecycle.addStopHook { () =>
-      Future.successful(module.close)
+      module.close
     }
     module
   }
