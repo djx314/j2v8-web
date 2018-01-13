@@ -22,7 +22,7 @@ libraryDependencies ++= {
   )
 }
 
-val circeVersion = "0.9.0-M2"
+val circeVersion = "0.9.0"
 
 libraryDependencies ++= Seq(
   "io.circe" %% "circe-core",
@@ -30,7 +30,7 @@ libraryDependencies ++= Seq(
   "io.circe" %% "circe-parser"
 ).map(_ % circeVersion)
 
-val playV = "2.6.7"
+val playV = "2.6.11"
 
 //libraryDependencies += "commons-io" % "commons-io" % "2.5"
 
