@@ -22,7 +22,7 @@ libraryDependencies ++= {
   )
 }
 
-val circeVersion = "0.9.0"
+val circeVersion = "0.9.1"
 
 libraryDependencies ++= Seq(
   "io.circe" %% "circe-core",
@@ -30,15 +30,15 @@ libraryDependencies ++= Seq(
   "io.circe" %% "circe-parser"
 ).map(_ % circeVersion)
 
-val playV = "2.6.11"
+val playV = "2.6.12"
 
 //libraryDependencies += "commons-io" % "commons-io" % "2.5"
 
-//libraryDependencies += "com.typesafe.play" %% "play-guice" % playV
+libraryDependencies += "com.typesafe.play" %% "play-guice" % playV
 //lazy val playVersion = play.core.PlayVersion.current
 libraryDependencies += "com.typesafe.play" %% "play" % playV
 //lazy val ubwProject = RootProject(file("../ubw"))
-scalaVersion := "2.12.4"
+scalaVersion := "2.12.5"
 //dependsOn(ubwProject)
 scalacOptions ++= Seq("-Ywarn-unused-import", "-deprecation")
 
